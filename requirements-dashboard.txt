@@ -1,0 +1,19 @@
+# Minimal dependencies for the Streamlit dashboard.
+#
+# The full training pipeline (main.py, fairness_baselines.py, plot scripts) has
+# many heavier deps (hydra, scikit-learn, xgboost, causalml, fairlearn, ...) --
+# none of those are needed to RUN the dashboard, because the dashboard is
+# read-only over CSVs and JSONs produced by the pipeline.
+#
+# If you want to deploy on Streamlit Community Cloud, this file is what the
+# cloud installs. Keep it light; cold start is faster.
+
+streamlit>=1.30
+plotly>=5.20
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+
+# Used by the styled DataFrame in the lending reward-table expander.
+jinja2>=3.0
+matplotlib>=3.7

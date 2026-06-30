@@ -1,0 +1,43 @@
+defaults:
+  - use_case: health
+  - _self_
+
+_recursive_: true
+
+data_path: ${use_case.data_path}
+result_path: ${use_case.result_path}
+
+criteria: ${use_case.criteria}
+models: ${use_case.models}
+actors: ${use_case.actors}
+actions_outcomes: ${use_case.actions_outcomes}
+augmentation_for_rewards: ${use_case.augmentation_for_rewards}
+context: ${use_case.context}
+case_specific_metrics: ${use_case.case_specific_metrics}
+ranking_weights: ${use_case.criteria.ranking_weights}
+reward_calculator: ${use_case.reward_calculator}
+standard_metrics: ${use_case.standard_metrics}
+fairness_metrics: ${use_case.fairness_metrics}
+
+categorical_columns:
+  - Action
+  - Outcome
+
+cv_splits: 5
+test_size: 0.2
+sample_size: 1000
+seed: 111            # global seed; used for split, KFold, classifier, SMOTE, summary RNG
+
+decision_criteria:
+  - Maximin
+  - Nash Social Welfare
+  - Kalai-Smorodinsky
+  - Nash Bargaining
+  - Compromise Programming
+  - Proportional Fairness
+
+# --- options consumed by helper scripts (fairness_baselines.py, etc.) -------
+# Declared here so Hydra doesn't reject them in struct mode. Leave as null
+# unless the helper script you're running uses them.
+merge_with: null      # path to an existing decision-metrics CSV to merge baselines into
+baselines: null       # optional list, e.g. baselines='[FairLearn_EG_DP,FairLearn_TO_EO]'

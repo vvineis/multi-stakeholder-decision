@@ -1,0 +1,6 @@
+Suggested Params Outcome: {'class_weight': 'balanced', 'max_depth': 20, 'min_samples_split': 2, 'n_estimators': 200}
+Suggested Params Reward: {'max_depth': 10, 'n_estimators': 150}
+Final Outcome Score: 0.7669172932330827
+samples: 5000
+cv_splits: 5
+seed: 111

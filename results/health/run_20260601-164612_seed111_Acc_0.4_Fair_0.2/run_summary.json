@@ -1,0 +1,36 @@
+{
+  "seed": 111,
+  "sample_size": 787,
+  "cv_splits": 3,
+  "use_case": "health",
+  "model_type": "causal_regression",
+  "ranking_weights": {
+    "Demographic_Parity": 0.2,
+    "Total_cognitive_score": 0.2,
+    "Avg_outcome_difference": 0,
+    "Percentage_treated": 0,
+    "Mean_outcome_treated": 0,
+    "Mean_outcome_control": 0,
+    "Accuracy": 0.4,
+    "Mean_Regret": 0,
+    "Cost_effectiveness": 0.2
+  },
+  "suggested_params_outcome": {
+    "max_depth": 5,
+    "n_estimators": 20
+  },
+  "suggested_params_reward": {
+    "max_depth": null,
+    "n_estimators": 100
+  },
+  "outcome_model": {
+    "metric": "MAE",
+    "value": 1.3170708300459735
+  },
+  "reward_models_mse_per_actor": {
+    "Parent": 0.007527812570303545,
+    "Healthcare_Provider": 0.015308112858983064,
+    "Policy_Maker": 0.03970403164667633
+  },
+  "best_criterion": "Outcome_Maxim"
+}

@@ -1,0 +1,18 @@
+# Streamlit theme + server config for the cloud deploy.
+# Edit colors here to match the paper's figure palette if you want.
+
+[theme]
+base = "light"
+primaryColor = "#003e49"          # selectable widgets
+backgroundColor = "#f5f5f5dc"
+secondaryBackgroundColor = "#f5f5f7"
+textColor = "#0e1021"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Allow the app to serve static files from the repo root (so we can show the
+# paper title image or a methodology diagram if you add one later).
+enableStaticServing = true

@@ -1,0 +1,6 @@
+Suggested Params Outcome: {'max_depth': 5, 'n_estimators': 20}
+Suggested Params Reward: {'max_depth': None, 'n_estimators': 100}
+Final Outcome Score: 1.3170708300459735
+samples: 787
+cv_splits: 3
+seed: 111

@@ -1,0 +1,35 @@
+{
+  "seed": 111,
+  "sample_size": 10000,
+  "cv_splits": 5,
+  "use_case": "lending",
+  "model_type": "classification",
+  "outcome_classifier": "sklearn.neighbors.KNeighborsClassifier",
+  "reward_variant": "base",
+  "ranking_weights": {
+    "Demographic_Parity": 0.2,
+    "Equal_Opportunity": 0,
+    "Conditional_Outcome_Parity": 0.2,
+    "Total_Profit": 0.2,
+    "Accuracy": 0.4,
+    "Unexploited_Profit": 0.0,
+    "Total_Loss": 0.0
+  },
+  "suggested_params_outcome": {
+    "n_neighbors": 3
+  },
+  "suggested_params_reward": {
+    "max_depth": 10,
+    "n_estimators": 150
+  },
+  "outcome_model": {
+    "metric": "Accuracy",
+    "value": 0.6466165413533834
+  },
+  "reward_models_mse_per_actor": {
+    "Bank": 0.0003833858747309608,
+    "Applicant": 0.0004127932846906453,
+    "Regulatory": 0.0006250972112193052
+  },
+  "best_criterion": "Oracle"
+}

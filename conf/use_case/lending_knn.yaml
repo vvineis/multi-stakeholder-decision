@@ -1,0 +1,144 @@
+# Same as lending.yaml, except the outcome model is K-Nearest Neighbors.
+# Use via:  python main.py use_case=lending_knn sample_size=10000 cv_splits=3 seed=42
+#
+# All other fields are inherited verbatim from lending.yaml -- only `models.outcome`
+# changes. Keeping a parallel copy is the simplest path; Hydra config groups would
+# also work but require restructuring the rest of the YAML.
+
+name: lending
+
+data_path: "C:/Users/Vittoria/Desktop/part-train/participatory_training-main/data/lending_club_data.csv"
+result_path: "C:/Users/Vittoria/Desktop/part-train/new-code/results/lending/"
+
+criteria:
+  ranking_criteria:
+    Demographic_Parity: zero
+    Equal_Opportunity: zero
+    Conditional_Outcome_Parity: zero
+    Total_Profit: max
+    Accuracy: max
+    Unexploited_Profit: min
+    Total_Loss: min
+
+  metrics_for_evaluation:
+    - Demographic_Parity
+    - Equal_Opportunity
+    - Conditional_Outcome_Parity
+    - Total_Profit
+    - Accuracy
+    - Unexploited_Profit
+    - Total_Loss
+
+  ranking_weights:
+    Demographic_Parity: 0.2
+    Equal_Opportunity: 0
+    Conditional_Outcome_Parity: 0.2
+    Total_Profit: 0.2
+    Accuracy: 0.4
+    Unexploited_Profit: 0.0
+    Total_Loss: 0.0
+
+case_specific_metrics:
+  metrics:
+    - Total_Profit
+    - Total_Loss
+    - Unexploited_Profit
+
+  case_specific_metrics_module:
+    _target_: utils.metrics.case_specific_metrics.LendingCaseMetrics
+
+  positive_attribute_for_fairness: 'Applicant_Type'
+  positive_group_value: 1
+
+standard_metrics:
+  - Precision
+  - Recall
+  - F1 Score
+  - Accuracy
+
+fairness_metrics:
+  - Demographic_Parity
+  - Equal_Opportunity
+  - Conditional_Outcome_Parity
+
+reward_calculator:
+  _target_: utils.rewards.get_rewards.RewardCalculator
+  reward_types: ${actors.reward_types}
+  reward_variant: base
+
+# ---- KNN-specific block --------------------------------------------------
+models:
+  outcome:
+    model_type: classification
+    model_class: OutcomeModel
+    classifier:
+      _target_: sklearn.neighbors.KNeighborsClassifier
+    param_grid:
+      n_neighbors: [3, 5, 10]
+
+  rewards:
+    regressor:
+      _target_: sklearn.ensemble.RandomForestRegressor
+      n_estimators: 100
+      max_depth: 10
+      random_state: 42
+    param_grid:
+      n_estimators: [50, 100, 150]
+      max_depth: [null, 10, 20]
+
+actions_outcomes:
+  actions_set:
+    - Grant
+    - Grant_lower
+    - Not_Grant
+
+  positive_actions_set:
+    - Grant
+    - Grant_lower
+
+  outcomes_set:
+    - Fully_Repaid
+    - Partially_Repaid
+    - Not_Repaid
+
+  positive_outcomes_set:
+    - Fully_Repaid
+    - Partially_Repaid
+
+  mapping:
+    Fully_Repaid: Grant
+    Not_Repaid: Not_Grant
+    default: Grant_lower
+
+actors:
+  actor_list:
+    - Bank
+    - Applicant
+    - Regulatory
+    - Oracle
+    - Outcome_Pred_Model
+
+  reward_types:
+    - Bank
+    - Applicant
+    - Regulatory
+
+augmentation_for_rewards:
+  augmentation_parameters:
+    actions_set: ${actions_outcomes.actions_set}
+    additional_arguments: ["Applicant_Type", "Loan_Amount", "Interest_Rate"]
+
+context:
+  feature_columns:
+    - Income
+    - Credit_Score
+    - Loan_Amount
+    - Interest_Rate
+
+  columns_to_display:
+    - Income
+    - Credit_Score
+    - Loan_Amount
+    - Interest_Rate
+    - Applicant_Type
+    - Recoveries

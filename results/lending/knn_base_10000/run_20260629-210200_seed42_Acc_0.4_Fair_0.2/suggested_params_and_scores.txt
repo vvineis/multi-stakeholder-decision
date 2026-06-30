@@ -1,0 +1,6 @@
+Suggested Params Outcome: {'n_neighbors': 3}
+Suggested Params Reward: {'max_depth': 10, 'n_estimators': 150}
+Final Outcome Score: 0.6353383458646616
+samples: 10000
+cv_splits: 5
+seed: 42

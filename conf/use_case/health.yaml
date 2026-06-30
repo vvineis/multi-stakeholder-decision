@@ -1,0 +1,165 @@
+name: health
+
+data_path: "C:/Users/Vittoria/Desktop/part-train/participatory_training-main/data/health/ihdp_npci_1.csv"
+result_path: "C:/Users/Vittoria/Desktop/part-train/new-code/results/health/"
+
+criteria:
+  ranking_criteria:
+    Demographic_Parity: zero
+    Total_cognitive_score: max
+    Avg_outcome_difference: min
+    Percentage_treated: max
+    Mean_outcome_treated: max
+    Mean_outcome_control: max
+    Accuracy: max
+    Mean_Regret: min
+    Cost_effectiveness: max
+
+  metrics_for_evaluation:
+    - Demographic_Parity
+    - Total_cognitive_score
+    - Avg_outcome_difference
+    - Percentage_treated
+    - Mean_outcome_treated
+    - Mean_outcome_control
+    - Accuracy
+    - Mean_Regret
+    - Cost_effectiveness
+  
+  ranking_weights:
+    Demographic_Parity: 0.2
+    Total_cognitive_score: 0.2
+    Avg_outcome_difference: 0
+    Percentage_treated: 0
+    Mean_outcome_treated: 0
+    Mean_outcome_control: 0
+    Accuracy: 0.4
+    Mean_Regret: 0
+    Cost_effectiveness: 0.2
+
+case_specific_metrics: 
+  metrics: 
+    - 'Total_cognitive_score'
+    - 'Avg_outcome_difference'
+    - 'Percentage_treated'
+    - 'Mean_outcome_treated'
+    - 'Mean_outcome_control'
+    - 'Cost_effectiveness'
+
+  case_specific_metrics_module: 
+    _target_: utils.metrics.case_specific_metrics.HealthCaseMetrics
+  
+  positive_attribute_for_fairness: x23
+  positive_group_value: 1
+  threshold_outcome: 2.223557401709045 #median value across all values in the train set
+
+standard_metrics: 
+  - Accuracy
+  - Mean_Regret
+
+fairness_metrics: 
+  - Demographic_Parity
+
+reward_calculator:
+  _target_: utils.rewards.get_rewards.HealthRewardCalculator
+  reward_types: ${actors.reward_types}
+  base_cost: {'A': 100, 'C': 10}
+
+
+models:
+  outcome: 
+    model_type: causal_regression
+    model_class: CausalOutcomeModel
+    learner:
+      _target_: xgboost.XGBRegressor
+      random_state: 42
+    param_grid:
+      max_depth: [5]
+      n_estimators: [20, 50]
+        
+
+  rewards:
+    regressor:
+      _target_: sklearn.ensemble.RandomForestRegressor
+      n_estimators: 100
+      max_depth: 10
+      random_state: 42  
+    param_grid:
+      n_estimators:
+        - 50
+        - 100
+        - 150
+      max_depth:
+        - null
+        - 10
+        - 20
+
+
+actions_outcomes:
+  actions_set: 
+    - A
+    - C
+
+  positive_actions_set:
+    - A
+
+  outcomes_set: #binarized outcome set based on the threshold
+   - 1
+   - 0
+  
+  positive_outcomes_set:
+    - 1
+
+actors: 
+  actor_list: 
+    - Parent
+    - Healthcare_Provider
+    - Policy_Maker
+    - Outcome_Maxim
+
+  reward_types: 
+    - Parent
+    - Healthcare_Provider
+    - Policy_Maker
+
+augmentation_for_rewards:
+  augmentation_parameters:
+      actions_set: ${actions_outcomes.actions_set}
+      additional_arguments: ['x23']
+
+context:
+  feature_columns:
+    - x1
+    - x2
+    - x3
+    - x4
+    - x5
+    - x6
+    - x7
+    - x8
+    - x9
+    - x10
+    - x11
+    - x12
+    - x13
+    - x14
+    - x15
+    - x16
+    - x17
+    - x18
+    - x19
+    - x20
+    - x21
+    - x22
+    - x23
+    - x24
+    - x25
+
+
+
+  columns_to_display:
+    - x23
+
+
+
+  
