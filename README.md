@@ -10,7 +10,7 @@ This repository accompanies the JAIR submission *"A Multi-Stakeholder Framework 
 
 A read-only Streamlit instance reproducing every ranking, radar, and trade-off table from the paper is publicly hosted at:
 
-### **[https://participatory-framework.streamlit.app/](https://participatory-framework.streamlit.app/)**
+### **[https://accpuntability-dashboard.streamlit.app/](https://participatory-framework.streamlit.app/)**
 
 In ~30 seconds you can:
 
