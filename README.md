@@ -181,25 +181,6 @@ for seed in 42 111 1111; do
 done
 ```
 
----
-
-## Paper figures
-
-### Fig. 2 and Fig. 3 — paper figures via the notebook
-
-Both the dashboard-style three-panel radar (Fig. 2) and the four sensitivity panels (Fig. 3a/b/c/d) are produced by `plots_paper.ipynb`. Open the notebook and *Run All* — it walks every `run_summary.json` under `results/`, groups runs by the relevant metadata field, aggregates across seeds, and saves PNGs into `figs/`.
-
-```bash
-jupyter notebook plots_paper.ipynb
-```
-
-The notebook produces, in order:
-- `figs/fig2_lending.png`, `figs/fig2_health.png` — three-panel radar per use case.
-- `figs/fig3a_lending_reward_variant.png` — reward-structure sensitivity (RF, `n=10000`).
-- `figs/fig3b_lending_model.png` — RF vs KNN (base reward, `n=10000`).
-- `figs/fig3c_health.png` — healthcare across seeds.
-
-If a panel reports *"no data for ..."* you're missing a sweep axis — the cell printouts above each plot tell you which sample sizes / reward variants / models were actually found in your `results/`.
 
 ### Pareto frontier (classical multi-objective view)
 
