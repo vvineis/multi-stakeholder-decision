@@ -22,9 +22,10 @@ Optional overlay
 each actor's marker by how often it is the consensus winner across the
 sweep. Only meaningful in single-bucket mode.
 
-Reference / baseline actors (`Oracle`, `Random`, `Outcome_Pred_Model`,
-`Outcome_Maxim`) are excluded by default; override with `--include-all` or
-pass an explicit `--actors` list.
+Reference / baseline actors (`Oracle`, `Random`, `Outcome_Maxim`,
+`Nash Social Welfare`) are excluded by default. `Outcome_Pred_Model` is
+kept so it appears as a prediction baseline alongside the compromise rules.
+Override with `--include-all` or pass an explicit `--actors` list.
 """
 from __future__ import annotations
 
@@ -39,9 +40,35 @@ import pandas as pd
 import yaml
 
 
-DEFAULT_EXCLUDE = {"Oracle", "Random", "Outcome_Pred_Model", "Outcome_Maxim"}
+DEFAULT_EXCLUDE = {"Oracle", "Random", "Outcome_Maxim", "Nash Social Welfare"}
 BUCKET_MARKERS = ("o", "s", "^", "D", "P", "X")
 BUCKET_PALETTE = plt.get_cmap("tab10").colors
+
+
+# Canonical (actor -> palette slot) ordering. Keeps colours stable even if
+# some actors are dropped or new ones (e.g. Outcome_Pred_Model) are added back
+# in. Slots 0..9 map to tab10; 10+ map to Set2.
+#   0: blue   1: orange  2: green   3: red     4: purple
+#   5: brown  6: pink    7: gray    8: olive/yellow  9: cyan
+CANONICAL_ACTOR_ORDER = (
+    "Applicant",               # 0 blue
+    "Bank",                    # 1 orange
+    "Compromise Programming",  # 2 green   <- fixed
+    "Kalai-Smorodinsky",       # 3 red
+    "Maximin",                 # 4 purple
+    "Nash Bargaining",         # 5 brown
+    "Nash Social Welfare",     # 6 pink
+    "Proportional Fairness",   # 7 gray
+    "Regulatory",              # 8 olive/yellow  <- fixed
+    "Outcome_Pred_Model",      # 9 cyan
+    # Baselines and health actors follow (Set2 palette range).
+    "Outcome_Maxim",           # 10
+    "Oracle",                  # 11
+    "Random",                  # 12
+    "Healthcare_Provider",     # 13
+    "Parent",                  # 14
+    "Policy_Maker",            # 15
+)
 
 
 # ----------------------------------------------------------------------
@@ -191,7 +218,7 @@ def plot_pareto(
             ax.annotate(
                 label, (x_raw[idx], y_raw[idx]),
                 xytext=(7, 7), textcoords="offset points",
-                fontsize=8,
+                fontsize=12,
                 fontweight="bold" if is_p else "normal",
             )
 
@@ -206,8 +233,8 @@ def plot_pareto(
             label="Pareto frontier", zorder=2,
         )
 
-    ax.set_xlabel(_axis_label(x_metric, x_dir), fontsize=11)
-    ax.set_ylabel(_axis_label(y_metric, y_dir), fontsize=11)
+    ax.set_xlabel(_axis_label(x_metric, x_dir), fontsize=12)
+    ax.set_ylabel(_axis_label(y_metric, y_dir), fontsize=12)
     seed_note = (
         f" -- mean across {n_seeds} seeds (error bars = SEM)" if n_seeds > 1 else ""
     )
@@ -218,7 +245,7 @@ def plot_pareto(
         fontsize=12,
     )
     ax.grid(alpha=0.3)
-    ax.legend(loc="best", fontsize=9, frameon=True)
+    ax.legend(loc="best", fontsize=12, frameon=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=200, bbox_inches="tight")
     print(f"Saved {output}")
@@ -229,6 +256,73 @@ def plot_pareto(
 # ----------------------------------------------------------------------
 # Multi-bucket Pareto -- one figure, colour + marker = bucket
 # ----------------------------------------------------------------------
+_EPS_PLOT = 1e-9
+
+# Consistent actor palette (same rule used by plot_ablation.py -- tab10 + Set2).
+ACTOR_PALETTE = plt.get_cmap("tab10").colors + plt.get_cmap("Set2").colors
+
+
+def make_actor_color_map(actors_present, palette=None) -> dict:
+    """Return a stable {actor: colour} map.
+
+    Actors listed in ``CANONICAL_ACTOR_ORDER`` keep their canonical palette
+    slot regardless of which subset is present -- so adding or dropping an
+    actor never shifts anyone else's colour. Unknown actors get slots after
+    the canonical range in alphabetical order.
+    """
+    palette = palette if palette is not None else ACTOR_PALETTE
+    canonical_set = set(CANONICAL_ACTOR_ORDER)
+    color_map = {}
+    for a in actors_present:
+        if a in canonical_set:
+            idx = CANONICAL_ACTOR_ORDER.index(a)
+            color_map[a] = palette[idx % len(palette)]
+    unknowns = sorted(a for a in actors_present if a not in canonical_set)
+    for j, a in enumerate(unknowns):
+        idx = len(CANONICAL_ACTOR_ORDER) + j
+        color_map[a] = palette[idx % len(palette)]
+    return color_map
+
+
+def _normalize_for_display(series: pd.Series, direction: str, metric_name: str) -> pd.Series:
+    """Same rule as utils/ranking/ranker.py so the Pareto axes agree with the score.
+
+    * Accuracy: pass through (already in [0, 1]).
+    * max     : (x - lo) / (hi - lo).
+    * min     : (hi - x) / (hi - lo).
+    * zero    : 1 - |x| / max|x|   -- 1 corresponds to raw value 0 (perfectly fair).
+    """
+    if metric_name == "Accuracy":
+        return series.copy()
+    if direction == "max":
+        lo, hi = series.min(), series.max()
+        return (series - lo) / max(hi - lo, _EPS_PLOT)
+    if direction == "min":
+        lo, hi = series.min(), series.max()
+        return (hi - series) / max(hi - lo, _EPS_PLOT)
+    if direction == "zero":
+        max_abs = series.abs().max()
+        return 1.0 - series.abs() / max(max_abs, _EPS_PLOT)
+    return series
+
+
+def _sem_in_norm_space(sem_series: pd.Series, direction: str,
+                       metric_name: str, x_series: pd.Series) -> pd.Series:
+    """Approximate SEM in the normalized [0,1] frame (linear rescale).
+
+    For zero-direction metrics we scale by max|x|; for max/min we scale by the
+    range; for Accuracy we pass through. This is exact for max/min directions
+    and near-exact for zero when the SEM does not straddle 0.
+    """
+    if metric_name == "Accuracy" or direction not in ("max", "min", "zero"):
+        return sem_series
+    if direction in ("max", "min"):
+        rng = float(x_series.max() - x_series.min())
+        return sem_series / max(rng, _EPS_PLOT)
+    # zero
+    return sem_series / max(float(x_series.abs().max()), _EPS_PLOT)
+
+
 def plot_pareto_multi(
     bucket_dfs: list[pd.DataFrame],
     bucket_labels: list[str],
@@ -239,11 +333,19 @@ def plot_pareto_multi(
     annotate: bool = True,
     n_seeds_max: int = 1,
 ):
+    """Multi-bucket Pareto plot.
+
+    Both axes are re-scaled to [0, 1] with **1 = best**, using the same
+    normalization rule as the ranking score. Colour encodes the compromise
+    rule (actor), marker shape encodes the deployment bucket, and every
+    bucket has its **own Pareto frontier** highlighted so the reader can
+    read off the winners per configuration.
+    """
     ranking_criteria = dict(use_case_cfg["criteria"]["ranking_criteria"])
     x_dir = ranking_criteria.get(x_metric, "max")
     y_dir = ranking_criteria.get(y_metric, "max")
 
-    # Build a unified frame with (Actor, Bucket, raw x/y, sem x/y).
+    # ---- Build the combined frame (raw values from each bucket) ----
     rows = []
     for bucket_idx, (df, label) in enumerate(zip(bucket_dfs, bucket_labels)):
         for _, row in df.iterrows():
@@ -251,8 +353,8 @@ def plot_pareto_multi(
                 "Actor/Criterion": row["Actor/Criterion"],
                 "bucket": label,
                 "bucket_idx": bucket_idx,
-                x_metric: row[x_metric],
-                y_metric: row[y_metric],
+                x_metric: float(row[x_metric]),
+                y_metric: float(row[y_metric]),
                 f"{x_metric}_sem": float(row.get(f"{x_metric}_sem", 0.0) or 0.0),
                 f"{y_metric}_sem": float(row.get(f"{y_metric}_sem", 0.0) or 0.0),
             })
@@ -260,103 +362,130 @@ def plot_pareto_multi(
     if combined.empty:
         raise SystemExit("No rows after combining buckets.")
 
-    x_raw = combined[x_metric].values
-    y_raw = combined[y_metric].values
-    x_better = _higher_better_score(combined[x_metric], x_dir).values
-    y_better = _higher_better_score(combined[y_metric], y_dir).values
-    is_pareto = pareto_front_indices(np.column_stack([x_better, y_better]))
+    # ---- Normalise both axes to [0, 1] with 1 = best ----
+    x_norm = _normalize_for_display(combined[x_metric], x_dir, x_metric).values
+    y_norm = _normalize_for_display(combined[y_metric], y_dir, y_metric).values
+    x_sem_n = _sem_in_norm_space(combined[f"{x_metric}_sem"], x_dir, x_metric, combined[x_metric]).values
+    y_sem_n = _sem_in_norm_space(combined[f"{y_metric}_sem"], y_dir, y_metric, combined[y_metric]).values
+    combined["_x_norm"] = x_norm
+    combined["_y_norm"] = y_norm
 
+    # ---- Per-bucket Pareto: identify optimal points WITHIN each bucket ----
+    # (In the normalized frame both axes are higher-is-better, so a simple
+    # non-dominated check is enough.)
+    is_pareto_per_bucket = np.zeros(len(combined), dtype=bool)
+    for bucket_idx in combined["bucket_idx"].unique():
+        mask = (combined["bucket_idx"] == bucket_idx).values
+        pts = np.column_stack([x_norm[mask], y_norm[mask]])
+        sub_pareto = pareto_front_indices(pts)
+        # write back into the full-length mask
+        pos_indices = np.where(mask)[0]
+        is_pareto_per_bucket[pos_indices[sub_pareto]] = True
+
+    # ---- Stable colour per actor + marker per bucket ----
+    # Canonical actor -> palette-slot map (see make_actor_color_map): keeps
+    # Regulatory yellow / Compromise Programming green regardless of which
+    # subset of actors is present, so adding e.g. Outcome_Pred_Model does not
+    # shift anyone else's colour.
+    actors_present_set = set(combined["Actor/Criterion"])
+    actor_color = make_actor_color_map(actors_present_set)
+    # Legend order: canonical actors in their canonical order, unknowns after.
+    actors_present = [a for a in CANONICAL_ACTOR_ORDER if a in actors_present_set]
+    actors_present += sorted(a for a in actors_present_set if a not in set(CANONICAL_ACTOR_ORDER))
+    bucket_markers = list(BUCKET_MARKERS)[:len(bucket_dfs)]
+
+    # ============================================================
+    # Draw
+    # ============================================================
     fig, ax = plt.subplots(figsize=(11.5, 8))
+    ax.set_xlim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)
 
-    n = len(bucket_dfs)
-    bucket_colors = [BUCKET_PALETTE[i % 10] for i in range(n)]
-    bucket_markers = list(BUCKET_MARKERS)[:n]
+    # Error bars first (light grey so they sit under the markers).
+    if n_seeds_max > 1 and (np.any(x_sem_n > 0) or np.any(y_sem_n > 0)):
+        ax.errorbar(
+            x_norm, y_norm, xerr=x_sem_n, yerr=y_sem_n,
+            fmt="none", ecolor="lightgray", elinewidth=1.0, capsize=2.5,
+            alpha=0.55, zorder=1,
+        )
 
-    # Plot one bucket at a time so legend handles map cleanly to (color, marker).
+    # One bucket at a time so we get one legend entry per bucket.
     for bucket_idx, label in enumerate(bucket_labels):
         sub_mask = (combined["bucket_idx"] == bucket_idx).values
         if not sub_mask.any():
             continue
-        sub = combined[sub_mask].reset_index(drop=True)
-        sub_pareto = is_pareto[sub_mask]
-        x_err = sub[f"{x_metric}_sem"].values
-        y_err = sub[f"{y_metric}_sem"].values
+        sub_pareto = is_pareto_per_bucket[sub_mask]
+        # Sizes and edge widths differentiate Pareto-optimal (within-bucket)
+        # from dominated. Pareto-optimal get a much bigger marker + thick
+        # black edge, dominated get a small marker with a thin grey edge.
+        sizes = np.where(sub_pareto, 320, 90)
+        edge_colors = np.where(sub_pareto, "black", "#999")
+        edge_widths = np.where(sub_pareto, 2.2, 0.6)
+        colors = [actor_color[a] for a in combined.loc[sub_mask, "Actor/Criterion"]]
 
-        if n_seeds_max > 1 and (np.any(x_err > 0) or np.any(y_err > 0)):
-            ax.errorbar(
-                sub[x_metric].values, sub[y_metric].values,
-                xerr=x_err, yerr=y_err,
-                fmt="none", ecolor=bucket_colors[bucket_idx],
-                elinewidth=1.0, capsize=2.5, alpha=0.40, zorder=2,
-            )
-
-        # Sizes / edges differentiate Pareto-optimal vs dominated.
-        sizes = np.where(sub_pareto, 270, 110)
-        edge_widths = np.where(sub_pareto, 1.8, 0.6)
         ax.scatter(
-            sub[x_metric].values, sub[y_metric].values,
-            s=sizes, c=[bucket_colors[bucket_idx]] * len(sub),
+            x_norm[sub_mask], y_norm[sub_mask],
+            s=sizes, c=colors,
             marker=bucket_markers[bucket_idx],
-            edgecolors="black", linewidths=edge_widths,
-            alpha=0.92, zorder=3, label=label,
+            edgecolors=edge_colors, linewidths=edge_widths,
+            alpha=0.94, zorder=3,
         )
 
-    # Annotate ONLY the Pareto-optimal points (the "winners"). Dominated
-    # points are still drawn but un-labelled, so the figure stays clean and
-    # the eye goes straight to what matters.
-    if annotate:
-        pareto_indices = np.where(is_pareto)[0]
-        if len(pareto_indices):
-            # Offset labels radially outward from the centroid of the
-            # Pareto-optimal points (so the labels sit on the outside, away
-            # from the dominated cloud and away from each other).
-            cx = float(combined[x_metric].iloc[pareto_indices].mean())
-            cy = float(combined[y_metric].iloc[pareto_indices].mean())
-            angles = np.arctan2(
-                combined[y_metric].iloc[pareto_indices].values - cy,
-                combined[x_metric].iloc[pareto_indices].values - cx,
-            )
-            order = np.argsort(angles)
-            radii = [55, 75, 95]   # stagger so close-by labels separate
-            for j, idx in enumerate(pareto_indices[order]):
-                row = combined.iloc[idx]
-                actor = row["Actor/Criterion"]
-                bucket = row["bucket"]
-                radius = radii[j % len(radii)]
-                ang = angles[order[j]]
-                dx = radius * np.cos(ang)
-                dy = radius * np.sin(ang)
-                ax.annotate(
-                    f"{actor}\n({bucket})",
-                    xy=(row[x_metric], row[y_metric]),
-                    xytext=(dx, dy), textcoords="offset points",
-                    fontsize=9, fontweight="bold",
-                    ha="center", va="center", color="#111",
-                    bbox=dict(boxstyle="round,pad=0.30", facecolor="white",
-                              edgecolor="#444", alpha=0.95, linewidth=1.0),
-                    arrowprops=dict(arrowstyle="-", color="#444",
-                                    alpha=0.7, linewidth=0.9,
-                                    shrinkA=0.5, shrinkB=4),
-                    zorder=5,
-                )
-
-    ax.set_xlabel(_axis_label(x_metric, x_dir), fontsize=11)
-    ax.set_ylabel(_axis_label(y_metric, y_dir), fontsize=11)
-    seed_note = f" -- mean across {n_seeds_max} seeds; error bars = SEM" if n_seeds_max > 1 else ""
-    ax.set_title(
-        f"Pareto-optimal strategies across buckets: "
-        f"{x_metric.replace('_', ' ')} vs {y_metric.replace('_', ' ')}{seed_note}\n"
-        f"(larger markers = Pareto-optimal in the combined population)",
-        fontsize=12,
-    )
+    # ---- Axis labels only (no title) ----
+    x_label = f"{x_metric.replace('_', ' ')}  (normalized, 1 = best)"
+    y_label = f"{y_metric.replace('_', ' ')}  (normalized, 1 = best)"
+    ax.set_xlabel(x_label, fontsize=12)
+    ax.set_ylabel(y_label, fontsize=12)
     ax.grid(alpha=0.3)
-    ax.legend(loc="best", fontsize=9, frameon=True, title="Bucket")
+
+    # ---- Two legends stacked below the axis, aligned with its bottom ----
+    from matplotlib.lines import Line2D
+    bucket_handles = [
+        Line2D([0], [0], marker=bucket_markers[i], color="w",
+               markerfacecolor="#666", markeredgecolor="black", markersize=11,
+               label=bucket_labels[i])
+        for i in range(len(bucket_labels))
+    ]
+    actor_handles = [
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor=actor_color[a], markeredgecolor="black", markersize=11,
+               label=a)
+        for a in actors_present
+    ]
+    # Legend 1: buckets -- single row of markers just below the axis.
+   # Legend 1: Bucket (marker shape) - Placed at the top right
+    leg1 = ax.legend(
+        handles=bucket_handles,
+        loc="upper left",               # Anchor from the upper-left corner of the legend
+        bbox_to_anchor=(1.05, 1.0),     # Slightly to the right (1.05) and aligned with the top of the axes (1.0)
+        ncol=1,                         # Changed to 1 column since it's on the side now
+        title="Bucket (marker shape)",
+        title_fontsize=10, 
+        fontsize=12, 
+        frameon=True,
+        edgecolor="lightgray",
+    )
+    ax.add_artist(leg1)
+
+    # Legend 2: decision functions -- Placed below Legend 1 on the right
+    ax.legend(
+        handles=actor_handles,
+        loc="upper left",               # Anchor from the upper-left corner of the legend
+        bbox_to_anchor=(1.05, 0.6),     # Same X position, but lower Y position (0.6) so they don't overlap
+        ncol=1,                         # Changed to 1 column for a clean vertical stack
+        title="Decision function (color)",
+        title_fontsize=10, 
+        fontsize=12, 
+        frameon=True,
+        edgecolor="lightgray",
+    )
+        
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=200, bbox_inches="tight")
     print(f"Saved {output}")
-    pareto_pairs = combined.loc[is_pareto, ["Actor/Criterion", "bucket"]].values.tolist()
-    print(f"Pareto-optimal (actor, bucket) pairs: {pareto_pairs}")
+    pareto_pairs = combined.loc[is_pareto_per_bucket, ["Actor/Criterion", "bucket"]].values.tolist()
+    print(f"Per-bucket Pareto-optimal (actor, bucket) pairs: {pareto_pairs}")
 
 
 # ----------------------------------------------------------------------
@@ -384,8 +513,8 @@ def main():
                         help="Whitelist of Actor/Criterion rows to plot. "
                              "If omitted, the default exclusion list is applied.")
     parser.add_argument("--include-all", action="store_true",
-                        help="Disable the default exclusion of Oracle / Random / "
-                             "Outcome_Pred_Model / Outcome_Maxim.")
+                        help="Disable the default exclusion "
+                             f"(currently: {sorted(DEFAULT_EXCLUDE)}).")
     parser.add_argument("--no-annotate", action="store_true",
                         help="Skip text labels on points.")
     args = parser.parse_args()

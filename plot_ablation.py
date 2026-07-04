@@ -384,69 +384,109 @@ def plot_population(df: pd.DataFrame, output: Path, title: str):
     with _style():
         fig, axes = plt.subplots(1, 2, figsize=(16, max(6, 0.45 * len(actors_violin) + 2)))
 
-        # Panel 1: winner shares + stability annotation
-        ax = axes[0]
-        ax.grid(False)
-        actors_bar = counts.index.tolist()[::-1]
-        values = counts.values[::-1]
-        pcts = pct.values[::-1]
-        stabs = [mean_stab.get(a, float("nan")) for a in actors_bar]
-        bar_colors = [color_map.get(a, "lightgray") for a in actors_bar]
-        bars = ax.barh(actors_bar, values, color=bar_colors,
-                       edgecolor="white", linewidth=1.5, alpha=0.92)
-        max_v = max(values) if len(values) else 1
-        for rect, v, p, stab in zip(bars, values, pcts, stabs):
-            stab_str = f"   stab={stab:.2f}" if not np.isnan(stab) else ""
-            ax.text(
-                v + max_v * 0.012, rect.get_y() + rect.get_height() / 2,
-                f"{int(v)}  ({p:.1f}%){stab_str}",
-                va="center", ha="left", fontsize=10, color="#222",
-            )
-        ax.set_xlim(0, max_v * 1.30)
-        ax.set_xlabel(f"Winning configurations  (of {total})", fontsize=11.5)
-        seed_subtitle = (
-            f"(stab = mean across-seed agreement on the winner, {n_seeds} seeds)"
-            if n_seeds > 1 else ""
+        _render_population_row(
+            axes[0], axes[1], df, color_map, actors_violin,
+            counts, total, mean_stab, n_seeds,
+            show_titles=True, show_ylabels=True,
         )
-        ax.set_title(f"How often does each compromise rule win?\n{seed_subtitle}", fontsize=13)
-        ax.grid(alpha=0.25, axis="x", linestyle="--")
-        for s in ("top", "right"):
-            ax.spines[s].set_visible(False)
-
-        # Panel 2: score violin (across configs, using mean across seeds)
-        ax = axes[1]
-        data = [df[df["Actor/Criterion"] == a]["weighted_sum_mean"].values for a in actors_violin]
-        positions = np.arange(1, len(actors_violin) + 1)
-        parts = ax.violinplot(
-            data, positions=positions, vert=False,
-            showmeans=False, showmedians=True, showextrema=False, widths=0.85,
-        )
-        for body, actor in zip(parts["bodies"], actors_violin):
-            body.set_facecolor(color_map[actor])
-            body.set_edgecolor("#333")
-            body.set_alpha(0.55)
-            body.set_linewidth(0.8)
-        if "cmedians" in parts:
-            parts["cmedians"].set_color("#7d1b1b")
-            parts["cmedians"].set_linewidth(2.2)
-        means = [np.mean(d) for d in data]
-        ax.scatter(means, positions, color="black", marker="D", s=22, zorder=5, label="mean")
-
-        ax.set_yticks(positions)
-        ax.set_yticklabels(actors_violin)
-        seed_subtitle_violin = f"mean over {n_seeds} seeds" if n_seeds > 1 else "single seed"
-        ax.set_xlabel(f"Weighted Normalized-Sum  ({seed_subtitle_violin})", fontsize=11.5)
-        ax.set_title("Score distribution across the sweep\n(ordered by median, red = median)",
-                     fontsize=12.5)
-        ax.grid(alpha=0.25, axis="x", linestyle="--")
-        for s in ("top", "right"):
-            ax.spines[s].set_visible(False)
 
         fig.suptitle(title, fontsize=14.5, y=1.02, fontweight="bold")
         fig.tight_layout()
         output.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output, dpi=200, bbox_inches="tight")
         print(f"Saved {output}")
+
+
+def _render_population_row(
+    ax_left, ax_right,
+    df: pd.DataFrame,
+    color_map: dict,
+    actors_violin: list[str],
+    counts: pd.Series,
+    total: int,
+    mean_stab: pd.Series,
+    n_seeds: int,
+    show_titles: bool = True,
+    show_ylabels: bool = True,
+    row_label: str | None = None,
+):
+    """Render the two-panel Dirichlet population view into a pair of axes.
+
+    Extracted from plot_population so a driver like plot_stacked_dirichlet.py
+    can stack the same content vertically for multiple buckets while sharing
+    a canonical actor colour map.
+    """
+    # --- LEFT: winner shares + stability annotation (all evaluated actors) ---
+    ax = ax_left
+    ax.grid(False)
+    all_actors = sorted(df["Actor/Criterion"].unique())
+    counts_full = pd.Series({a: int(counts.get(a, 0)) for a in all_actors})
+    counts_full = counts_full.sort_values(ascending=True)
+    actors_bar = counts_full.index.tolist()
+    values = counts_full.values
+    pcts = [v / max(total, 1) * 100 for v in values]
+    stabs = [mean_stab.get(a, float("nan")) for a in actors_bar]
+    bar_colors = [color_map.get(a, "lightgray") for a in actors_bar]
+    bars = ax.barh(actors_bar, values, color=bar_colors,
+                   edgecolor="white", linewidth=1.5, alpha=0.92)
+    max_v = max(values) if len(values) and max(values) > 0 else 1
+    for rect, v, p, stab in zip(bars, values, pcts, stabs):
+        if v == 0:
+            continue
+        stab_str = f"   stab={stab:.2f}" if not np.isnan(stab) else ""
+        ax.text(
+            v + max_v * 0.012, rect.get_y() + rect.get_height() / 2,
+            f"{int(v)}  ({p:.1f}%){stab_str}",
+            va="center", ha="left", fontsize=10, color="#222",
+        )
+    ax.set_xlim(0, max_v * 1.30)
+    ax.set_xlabel(f"Winning configurations  (of {total})", fontsize=11.5)
+    if show_titles:
+        seed_subtitle = (
+            f"(stab = mean across-seed agreement on the winner, {n_seeds} seeds)"
+            if n_seeds > 1 else ""
+        )
+        ax.set_title(f"How often does each decision function win?\n{seed_subtitle}", fontsize=13)
+    if row_label is not None:
+        ax.set_ylabel(row_label, fontsize=13, fontweight="bold", labelpad=10)
+    if not show_ylabels:
+        ax.set_yticklabels([])
+    ax.grid(alpha=0.25, axis="x", linestyle="--")
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+
+    # --- RIGHT: score violin (mean across seeds per config) ---
+    ax = ax_right
+    data = [df[df["Actor/Criterion"] == a]["weighted_sum_mean"].values for a in actors_violin]
+    positions = np.arange(1, len(actors_violin) + 1)
+    parts = ax.violinplot(
+        data, positions=positions, vert=False,
+        showmeans=False, showmedians=True, showextrema=False, widths=0.85,
+    )
+    for body, actor in zip(parts["bodies"], actors_violin):
+        body.set_facecolor(color_map[actor])
+        body.set_edgecolor("#333")
+        body.set_alpha(0.55)
+        body.set_linewidth(0.8)
+    if "cmedians" in parts:
+        parts["cmedians"].set_color("#7d1b1b")
+        parts["cmedians"].set_linewidth(2.2)
+    means = [np.mean(d) for d in data]
+    ax.scatter(means, positions, color="black", marker="D", s=22, zorder=5, label="mean")
+
+    ax.set_yticks(positions)
+    if show_ylabels:
+        ax.set_yticklabels(actors_violin)
+    else:
+        ax.set_yticklabels([])
+    seed_subtitle_violin = f"mean over {n_seeds} seeds" if n_seeds > 1 else "single seed"
+    ax.set_xlabel(f"Weighted Normalized-Sum  ({seed_subtitle_violin})", fontsize=11.5)
+    if show_titles:
+        ax.set_title("Score distribution across the sweep\n(ordered by median, red = median)",
+                     fontsize=12.5)
+    ax.grid(alpha=0.25, axis="x", linestyle="--")
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
 
 
 # ======================================================================

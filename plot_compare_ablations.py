@@ -35,17 +35,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from plot_pareto import CANONICAL_ACTOR_ORDER, make_actor_color_map
+
 
 PALETTE = plt.get_cmap("tab10").colors + plt.get_cmap("Set2").colors
 
 
 def _style():
     return plt.rc_context({
-        "axes.titlesize": 13,
+        "axes.titlesize": 11,
         "axes.labelsize": 11,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-        "legend.fontsize": 9,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
         "axes.edgecolor": "#333",
         "axes.linewidth": 0.8,
         "axes.grid": True,
@@ -71,9 +73,9 @@ def _detect_sweep_kind(df):
 
 
 def _global_color_map(dfs: list[pd.DataFrame]) -> dict:
-    """One consistent colour per actor across every CSV."""
-    actors = sorted({a for df in dfs for a in df["Actor/Criterion"].unique()})
-    return {a: PALETTE[i % len(PALETTE)] for i, a in enumerate(actors)}
+    """One consistent colour per actor across every CSV -- canonical slots."""
+    actors = {a for df in dfs for a in df["Actor/Criterion"].unique()}
+    return make_actor_color_map(actors, palette=PALETTE)
 
 
 # ======================================================================
@@ -92,7 +94,7 @@ def compare_pairwise(dfs: list[pd.DataFrame], labels: list[str], output: Path, t
     with _style():
         n = len(dfs)
         fig, axes = plt.subplots(
-            n, 1, figsize=(12, max(2.8, 0.9 * n + 1.5)),
+            n, 1, figsize=(14, max(2.8, 0.9 * n + 1.8)),
             gridspec_kw={"hspace": 0.5}, sharex=True,
         )
         if n == 1:
@@ -134,13 +136,13 @@ def compare_pairwise(dfs: list[pd.DataFrame], labels: list[str], output: Path, t
                     if prev_winner is not None and region_start_x is not None:
                         midx = (region_start_x + x_vals[i - 1]) / 2
                         ax.text(midx, 0.5, prev_winner, ha="center", va="center",
-                                fontsize=8, fontweight="bold", color="white")
+                                fontsize=11, fontweight="bold", color="white")
                     prev_winner = w
                     region_start_x = x
             if prev_winner is not None and region_start_x is not None:
                 midx = (region_start_x + x_vals[-1]) / 2
                 ax.text(midx, 0.5, prev_winner, ha="center", va="center",
-                        fontsize=8, fontweight="bold", color="white")
+                        fontsize=11, fontweight="bold", color="white")
 
             ax.set_ylim(0, 1)
             ax.set_yticks([])
@@ -149,7 +151,7 @@ def compare_pairwise(dfs: list[pd.DataFrame], labels: list[str], output: Path, t
                 ax.spines[s].set_visible(False)
 
         axes[-1].set_xlabel(
-            x_col.replace("weight_", "Weight on ").replace("_", " "), fontsize=12,
+            x_col.replace("weight_", "Weight on ").replace("_", " "), fontsize=11,
         )
 
         # Shared legend below all strips
@@ -159,7 +161,7 @@ def compare_pairwise(dfs: list[pd.DataFrame], labels: list[str], output: Path, t
                    bbox_to_anchor=(0.5, -0.03), ncol=min(len(actors_present), 6),
                    frameon=False, title="Consensus winner")
 
-        fig.suptitle(title, fontsize=13.5, y=1.02)
+        fig.suptitle(title, fontsize=11, y=1.02)
         output.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output, dpi=200, bbox_inches="tight")
         print(f"Saved {output}")
@@ -169,69 +171,87 @@ def compare_pairwise(dfs: list[pd.DataFrame], labels: list[str], output: Path, t
 # Dirichlet: grouped winner-share bars (color = bucket, group = actor)
 # ======================================================================
 def compare_dirichlet(dfs: list[pd.DataFrame], labels: list[str], output: Path, title: str):
-    # Compute winner shares per CSV.
+    # Compute winner shares AND mean inter-seed stability per (bucket, actor).
     per_csv_counts = []
+    per_csv_stability = []          # mean consensus_winner_stability per (bucket, actor)
     totals = []
     for df in dfs:
         winners = df[df["is_consensus_winner"]]
         counts = winners["Actor/Criterion"].value_counts()
+        stab = winners.groupby("Actor/Criterion")["consensus_winner_stability"].mean()
         per_csv_counts.append(counts)
+        per_csv_stability.append(stab)
         totals.append(int(counts.sum()))
 
-    # Union of actors across the bucket CSVs, sorted by total wins (descending)
-    # so the most-frequent winners cluster at the top of the chart.
+    # Union of actors *evaluated* in any bucket (not just winners) so actors
+    # that competed but never won -- e.g. Outcome_Pred_Model when it is
+    # dominated by the compromise rules at every sample -- still get a bar
+    # (at 0%) rather than being silently dropped from the y-axis.
     union_counts: dict[str, int] = {}
+    for df in dfs:
+        for a in df["Actor/Criterion"].unique():
+            union_counts.setdefault(a, 0)
     for c in per_csv_counts:
         for a, v in c.items():
             union_counts[a] = union_counts.get(a, 0) + int(v)
-    actors = sorted(union_counts, key=lambda a: -union_counts[a])
+    # Sort by total wins (descending); zero-win actors sort to the bottom by
+    # count and then alphabetically for stability.
+    actors = sorted(union_counts, key=lambda a: (-union_counts[a], a))
 
     n = len(dfs)
     bucket_colors = [PALETTE[i % len(PALETTE)] for i in range(n)]
 
     with _style():
-        fig, ax = plt.subplots(figsize=(13, max(5, 0.45 * len(actors) + 2)))
+        # 1. INCREASE figure height factor from 0.45 to 0.85 (or higher) to stretch the plot vertically
+        fig, ax = plt.subplots(figsize=(8, max(5, 0.85 * len(actors) + 2)))
         ax.grid(False)
         y = np.arange(len(actors))
+        
+        # 2. To put more blank space between individual bars inside a block, 
+        # keep bar_h the same but set height to a fraction of it (e.g., bar_h * 0.85)
         bar_h = 0.8 / n
 
         for i, (label, counts, total) in enumerate(zip(labels, per_csv_counts, totals)):
             shares = np.array([counts.get(a, 0) / max(total, 1) * 100 for a in actors])
             offset = (i - (n - 1) / 2) * bar_h
+            
             ax.barh(
-                y + offset, shares, height=bar_h,
+                y + offset, shares, 
+                height=bar_h * 0.9,     # Leaves a 15% clear gap between single bars
                 color=bucket_colors[i],
                 edgecolor="white", linewidth=0.6, alpha=0.92,
                 label=f"{label}  (n={total})",
             )
-            # Inline percentage labels on each bar that's wide enough to be readable.
+            # Inline labels: percentage + mean inter-seed stability of that rule
+            # as consensus winner in this bucket (e.g.  "57%  s=0.80"). Label
+            # every actor that won at least one config; actors with a zero
+            # share (competed but never won) get no label -- an empty bar is a
+            # legible zero.
             max_share = max(shares) if len(shares) else 0
+            stab_series = per_csv_stability[i]
             for j, share in enumerate(shares):
-                if share >= max_share * 0.06:  # threshold to avoid clutter
+                if share > 0:
+                    actor = actors[j]
+                    stab_val = stab_series.get(actor, float("nan"))
+                    stab_str = f", stab={stab_val:.2f}" if not np.isnan(stab_val) else ""
                     ax.text(
                         share + max_share * 0.008,
                         y[j] + offset,
-                        f"{share:.0f}%",
-                        va="center", ha="left", fontsize=8.5, color="#222",
+                        f"{share:.0f}%{stab_str}",
+                        va="center", ha="left", fontsize=11, color="#222",
                     )
 
         ax.legend(loc="lower right", frameon=True, edgecolor="lightgray", title="Bucket")
         ax.set_yticks(y)
         ax.set_yticklabels(actors)
         ax.invert_yaxis()  # top-of-axis = most-frequent winner
-        ax.set_xlabel("Share of weight configurations won (%)", fontsize=11.5)
-        ax.set_title(title, fontsize=14, pad=15)
+        ax.set_xlabel("Share of weight configurations won (%)", fontsize=11)
+        ax.set_title(title, fontsize=11, pad=15)
         ax.grid(alpha=0.25, axis="x", linestyle="--")
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
 
-        ax.text(
-            0.99, -0.10,
-            "Bar color encodes the bucket; bar position encodes the compromise rule.",
-            transform=ax.transAxes, ha="right", va="top",
-            fontsize=9, style="italic", color="#555",
-        )
-
+     
         fig.tight_layout()
         output.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output, dpi=200, bbox_inches="tight")
@@ -258,8 +278,17 @@ def compare_ternary(dfs: list[pd.DataFrame], labels: list[str], output: Path, ti
     metric_b = varied[1][len("weight_"):]
     metric_c = varied[2][len("weight_"):]
 
-    actors_present = sorted({a for df in dfs for a in df[df["is_consensus_winner"]]["Actor/Criterion"].unique()})
-    color_map = {a: PALETTE[i % len(PALETTE)] for i, a in enumerate(actors_present)}
+    # Stable colour assignment: canonical actor slots (see plot_pareto.py's
+    # make_actor_color_map). Same actor -> same colour across compare_ternary
+    # and plot_pareto_multi and plot_combined_pareto_ternary, regardless of
+    # which subset of actors happens to be present.
+    all_actors_in_data = {a for df in dfs for a in df["Actor/Criterion"].unique()}
+    color_map = make_actor_color_map(all_actors_in_data, palette=PALETTE)
+    # The legend only shows actors that actually appear as consensus winners,
+    # ordered by canonical slot so the legend visually agrees with the Pareto.
+    winner_set = {a for df in dfs for a in df[df["is_consensus_winner"]]["Actor/Criterion"].unique()}
+    actors_present = [a for a in CANONICAL_ACTOR_ORDER if a in winner_set]
+    actors_present += sorted(a for a in winner_set if a not in set(CANONICAL_ACTOR_ORDER))
 
     n = len(dfs)
     bucket_markers = list(BUCKET_MARKERS)[:n]
@@ -315,11 +344,11 @@ def compare_ternary(dfs: list[pd.DataFrame], labels: list[str], output: Path, ti
 
         # Vertex labels
         ax.annotate(metric_a.replace("_", " "), A, xytext=(0, 14),
-                    textcoords="offset points", ha="center", fontsize=12, fontweight="bold")
+                    textcoords="offset points", ha="center", fontsize=11, fontweight="bold")
         ax.annotate(metric_b.replace("_", " "), B, xytext=(-10, -10),
-                    textcoords="offset points", ha="right", va="top", fontsize=12, fontweight="bold")
+                    textcoords="offset points", ha="right", va="top", fontsize=11, fontweight="bold")
         ax.annotate(metric_c.replace("_", " "), C, xytext=(10, -10),
-                    textcoords="offset points", ha="left", va="top", fontsize=12, fontweight="bold")
+                    textcoords="offset points", ha="left", va="top", fontsize=11, fontweight="bold")
 
         # Two legends: bucket (markers) and consensus-winner actor (colors).
         from matplotlib.lines import Line2D

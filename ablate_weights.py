@@ -35,8 +35,11 @@ Output: a single long-format CSV with one row per (config, actor):
     rank_within_config, is_consensus_winner, consensus_winner_stability
 
 Reference actors that are not compromise rules (`Oracle`, `Random`,
-`Outcome_Pred_Model`, `Outcome_Maxim`) are excluded from the winner search
-by default. Override with `--include-all`.
+`Outcome_Maxim`, `Nash Social Welfare`) are excluded from the winner search
+by default. `Outcome_Pred_Model` is *included* by default so it appears as a
+prediction-baseline reference in the ablation plots (usually with 0% winner
+share, showing the compromise rules dominate it). Override with
+`--include-all` or a custom `--exclude` list.
 """
 from __future__ import annotations
 
@@ -53,7 +56,7 @@ import yaml
 from utils.ranking.ranker import rerank
 
 
-DEFAULT_EXCLUDE = ("Oracle", "Random", "Outcome_Pred_Model", "Outcome_Maxim")
+DEFAULT_EXCLUDE = ("Oracle", "Random", "Outcome_Maxim", "Nash Social Welfare")
 
 
 # ----------------------------------------------------------------------

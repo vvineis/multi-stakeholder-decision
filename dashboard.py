@@ -40,14 +40,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from utils.ranking.ranker import rerank
 from utils.rewards.get_rewards import RewardCalculator
-from ablate_weights import (
-    DEFAULT_EXCLUDE as ABLATE_EXCLUDE,
-    ablate_to_long,
-    sweep_dirichlet,
-)
-
-import matplotlib.pyplot as _plt  # for the Dirichlet comparison panel
-from matplotlib.figure import Figure
 
 
 # ======================================================================
@@ -104,7 +96,7 @@ COMPROMISE_FORMULAS = {
 COMPROMISE_RULES = set(COMPROMISE_FORMULAS.keys())
 
 
-TRADEOFF_EXCLUDE = {"Oracle", "Random", "Outcome_Pred_Model"}
+TRADEOFF_EXCLUDE = {"Oracle", "Random"}
 
 
 # ----------------------------------------------------------------------
@@ -370,6 +362,29 @@ def build_tradeoff_table(
     return pd.DataFrame(rows)
 
 
+def _embed_pre_rendered_figure(
+    figure_path: Path,
+    caption: str,
+    regenerate_hint: str | None = None,
+    fallback_paths: list[Path] | None = None,
+) -> None:
+    """Show a pre-rendered PNG (produced by one of the paper-figure scripts)
+    inline. Tries `figure_path` first, then any `fallback_paths` in order.
+    If none exist, prints a friendly hint so the reader can regenerate it
+    with the same command the paper uses.
+    """
+    for candidate in (figure_path, *(fallback_paths or [])):
+        if candidate.exists():
+            st.image(str(candidate), caption=caption, use_container_width=True)
+            return
+    st.info(
+        f"Pre-rendered figure not found at `{figure_path.relative_to(PROJECT_ROOT)}`."
+    )
+    if regenerate_hint:
+        st.caption("Regenerate it with:")
+        st.code(regenerate_hint, language="bash")
+
+
 def hydra_command_for(missing: dict) -> str:
     """Print the exact `python main.py` line that would produce the missing config."""
     uc = "lending" if missing["model"] in ("rf", "xgb", "lgbm") else missing["model"]
@@ -514,25 +529,42 @@ banner_cols[2].metric("Model", model.upper())
 banner_cols[3].metric("Seeds aggregated", len(seeds_present))
 if sample_size:
     st.caption(f"All runs at sample_size = {sample_size}.")
+
+# Slug used to look up pre-rendered per-bucket figures on disk.
+# Convention: figs/{pareto,ablation}_<model>_<reward_variant>_<sample_size>_*.png,
+# matching the naming produced by the paper-figure scripts. Some legacy files
+# lack the sample_size suffix, so we also try `bucket_slug_short` as a fallback.
+bucket_slug = f"{model}_{reward_variant}_{sample_size}" if sample_size else f"{model}_{reward_variant}"
+bucket_slug_short = f"{model}_{reward_variant}"
+
 st.markdown("---")
 
 
 # ======================================================================
-# Compromise function formulas (paper Table 1)
+# Framework layers -- mirror the paper's Section on the dashboard.
+# The three layers below are Preference / Decision / Aggregation. Each is
+# rendered as its own top-level section so users can inspect a single stage
+# of the decision process in isolation.
 # ======================================================================
-with st.expander("Compromise function definitions  (paper Table 1)"):
-    st.markdown(
-        "Each compromise rule $C_j$ is defined by a score map "
-        r"$\Phi_j: [0,1]^{|\mathcal{I}|} \to \mathbb{R}$ that aggregates the "
-        "actor-specific expected rewards $E_{i,a}$ for each action $a$."
-    )
-    for name, (latex, description) in COMPROMISE_FORMULAS.items():
-        st.markdown(f"**{name}**")
-        st.latex(latex)
-        st.caption(description)
+st.header("Framework layers")
+st.caption(
+    "The dashboard mirrors the modular structure of the framework. "
+    "Each of the three decision layers below can be inspected independently, "
+    "localising disagreements over stakeholder preferences, compromise "
+    "mechanisms, or evaluation priorities to a specific stage of the pipeline."
+)
 
 
-with st.expander(f"Stakeholder reward functions  --  {use_case} ({reward_variant} variant)"):
+# ----------------------------------------------------------------------
+# 1. Preference layer -- stakeholder reward functions
+# ----------------------------------------------------------------------
+st.subheader("1. Preference layer  --  stakeholder reward functions")
+st.caption(
+    "Reward functions $r_i$ and, when applicable, action-outcome base reward "
+    "tables. Users can inspect how normative assumptions shape stakeholder "
+    "preferences before any learning takes place."
+)
+with st.expander(f"Show reward functions  --  {use_case} ({reward_variant} variant)", expanded=False):
     if use_case == "lending":
         st.markdown(
             r"For each applicant context, the reward of stakeholder $i$ is the "
@@ -593,29 +625,95 @@ with st.expander(f"Stakeholder reward functions  --  {use_case} ({reward_variant
             st.caption(descr)
 
 
+# ----------------------------------------------------------------------
+# 2. Decision layer -- compromise rules (paper Table 1)
+# ----------------------------------------------------------------------
+st.subheader("2. Decision layer  --  compromise rules")
+st.caption(
+    "Compromise rules $C_j$, each defined by a score map "
+    r"$\Phi_j: [0,1]^{|\mathcal{I}|} \to \mathbb{R}$ that aggregates the "
+    "actor-specific expected rewards $E_{i,a}$ for each action $a$. Users can "
+    "inspect the mathematical formulation and the normative interpretation "
+    "of every candidate rule."
+)
+with st.expander("Show compromise-rule definitions  (paper Table 1)", expanded=False):
+    for name, (latex, description) in COMPROMISE_FORMULAS.items():
+        st.markdown(f"**{name}**")
+        st.latex(latex)
+        st.caption(description)
+
+
+# ----------------------------------------------------------------------
+# 3. Aggregation layer -- interactive ranking
+# ----------------------------------------------------------------------
+st.subheader("3. Aggregation layer  --  metric selection and ranking")
+st.caption(
+    "Pick the evaluation metrics and their relative weights in the sidebar; "
+    "the table below is the resulting ranking of all candidate strategies "
+    "under the current normative choice."
+)
+st.metric("Best actor / criterion under current weights & metrics", value=str(best))
+
+display_rows = []
+for _, ranked_row in ranked_df.iterrows():
+    actor = ranked_row["Actor/Criterion"]
+    ar = agg[agg["Actor/Criterion"] == actor]
+    row = {
+        "Actor/Criterion": actor,
+        "Weighted Normalized-Sum": round(float(ranked_row["Weighted Normalized-Sum"]), 4),
+    }
+    for m in selected_metrics:
+        if not ar.empty and f"{m}_mean" in ar.columns:
+            mu = ar.iloc[0][f"{m}_mean"]
+            sem = ar.iloc[0][f"{m}_sem"]
+            row[m] = f"{mu:.3f} ± {sem:.3f}"
+        else:
+            row[m] = "n/a"
+    display_rows.append(row)
+table = pd.DataFrame(display_rows)
+table.insert(0, "Rank", np.arange(1, len(table) + 1))
+st.dataframe(table, use_container_width=True, hide_index=True)
+
+
+st.markdown("---")
+
+
 # ======================================================================
-# Radar + ranking table
+# Normative trade-off analyses -- three complementary visualisations.
+# Directly mirrors the paper's Section on the dashboard: performance radar,
+# trade-off explorer, cross-configuration comparison.
 # ======================================================================
-col_l, col_r = st.columns([3, 2], gap="large")
+st.header("Normative trade-off analyses")
+st.caption(
+    "Three complementary visualisations of the normative trade-offs behind "
+    "the recommended strategy: (i) a performance radar over the selected "
+    "metrics, (ii) a pairwise trade-off explorer, and (iii) a "
+    "cross-configuration comparison across deployment settings."
+)
 
-with col_l:
-    st.subheader("Performance radar (mean across seeds)")
-    st.caption(
-        "Each axis is normalized to [0, 1] with 1 = best, using the same rule as the score. "
-        "Hover any vertex for the mean and SEM across seeds."
-    )
 
-    available_actors = list(metrics_df["Actor/Criterion"].unique())
-    default_actors = [a for a in available_actors
-                      if a in {"Oracle", "Bank", "Applicant", "Maximin",
-                               "Nash Bargaining", "Proportional Fairness",
-                               "Parent", "Healthcare_Provider", "Policy_Maker"}]
-    selected_actors = st.multiselect(
-        "Actors / decision criteria to plot",
-        options=available_actors,
-        default=default_actors or available_actors[:5],
-    )
+# ----------------------------------------------------------------------
+# Trade-off analysis 1: Performance radar
+# ----------------------------------------------------------------------
+st.subheader("Performance radar")
+st.caption(
+    "Compares strategies across the selected metrics using the same "
+    "normalisation as the ranking score ($1 = $ best on each axis). "
+    "Hover any vertex to see the mean and SEM across seeds."
+)
 
+available_actors = list(metrics_df["Actor/Criterion"].unique())
+default_actors = [a for a in available_actors
+                  if a in {"Oracle", "Bank", "Applicant", "Maximin",
+                           "Nash Bargaining", "Proportional Fairness",
+                           "Parent", "Healthcare_Provider", "Policy_Maker"}]
+selected_actors = st.multiselect(
+    "Actors / decision criteria to plot",
+    options=available_actors,
+    default=default_actors or available_actors[:5],
+)
+
+if selected_actors:
     radar_norm = normalize_for_display(metrics_df, selected_metrics, ranking_criteria)
     fig = go.Figure()
     for actor in selected_actors:
@@ -658,45 +756,17 @@ with col_l:
         margin=dict(l=90, r=90, t=30, b=80),
     )
     st.plotly_chart(fig, use_container_width=True)
-
-with col_r:
-    st.subheader("Live ranking (mean + SEM)")
-    st.metric("Best actor / criterion under current weights & metrics", value=str(best))
-
-    # Build a compact display table:
-    # Actor | Weighted Normalized-Sum | <each selected metric mean (sem)>
-    display_rows = []
-    for _, ranked_row in ranked_df.iterrows():
-        actor = ranked_row["Actor/Criterion"]
-        ar = agg[agg["Actor/Criterion"] == actor]
-        row = {
-            "Actor/Criterion": actor,
-            "Weighted Normalized-Sum": round(float(ranked_row["Weighted Normalized-Sum"]), 4),
-        }
-        for m in selected_metrics:
-            if not ar.empty and f"{m}_mean" in ar.columns:
-                mu = ar.iloc[0][f"{m}_mean"]
-                sem = ar.iloc[0][f"{m}_sem"]
-                row[m] = f"{mu:.3f} ± {sem:.3f}"
-            else:
-                row[m] = "n/a"
-        display_rows.append(row)
-    table = pd.DataFrame(display_rows)
-    table.insert(0, "Rank", np.arange(1, len(table) + 1))
-    st.dataframe(table, use_container_width=True, hide_index=True)
+else:
+    st.info("Select at least one actor to render the radar.")
 
 
-st.markdown("---")
-
-
-# ======================================================================
-# Trade-off explorer (the user's "metric pair table" feature)
-# ======================================================================
-st.subheader("Trade-off explorer  -- two-metric weight grid")
+# ----------------------------------------------------------------------
+# Trade-off analysis 2: Pairwise weight explorer + Pareto/ternary figure
+# ----------------------------------------------------------------------
+st.subheader("Trade-off explorer  --  two-metric weight grid")
 st.caption(
-    "Pick two metrics and a grid of weights. For each row, the table shows "
-    "which compromise function (or actor) wins under that 2-metric mix. "
-    "Useful for ablation tables in the paper."
+    "Systematically varies the relative importance assigned to a pair of "
+    "competing metrics and reports the preferred strategy under each weighting."
 )
 
 tcol_a, tcol_b, tcol_c, tcol_d = st.columns([1, 1, 1, 1])
@@ -748,12 +818,51 @@ if "Best compromise" in trade_table.columns:
 st.markdown("---")
 
 
+# ----------------------------------------------------------------------
+# Trade-off analysis 3: Dirichlet weight ablation (selected bucket)
+# ----------------------------------------------------------------------
+st.subheader("Dirichlet weight ablation")
+st.caption(
+    f"Winner-share bars and per-configuration weighted-normalised-sum "
+    f"distributions for the currently selected bucket "
+    f"(**{reward_variant} / {model.upper()}**, sample size {sample_size}). "
+    "Weight vectors are drawn uniformly from the metric simplex; each "
+    "decision function's winner share summarises its robustness to normative "
+    "priorities."
+)
+_embed_pre_rendered_figure(
+    PROJECT_ROOT / "figs" / f"ablation_{bucket_slug}_dirichlet.png",
+    caption=f"Dirichlet weight ablation -- {reward_variant} / {model.upper()}.",
+    regenerate_hint=(
+        f"python ablate_weights.py --use-case {use_case} \\\n"
+        f"    --metrics-glob 'results/{use_case}/{bucket_slug}/run_*/final_ranked_decision_metrics.csv' \\\n"
+        f"    --sweep dirichlet --n-samples 500 \\\n"
+        f"    --output ablations/{bucket_slug}_dirichlet.csv\n"
+        f"python plot_ablation.py ablations/{bucket_slug}_dirichlet.csv \\\n"
+        f"    --output figs/ablation_{bucket_slug}_dirichlet.png"
+    ),
+    fallback_paths=[PROJECT_ROOT / "figs" / f"ablation_{bucket_slug_short}_dirichlet.png"],
+)
+
+
+st.markdown("---")
+
+
 # ======================================================================
-# Underlying model performance (aggregated)
+# Experimental reliability -- aggregated model performance & selection.
+# Sits at the bottom of the dashboard so the trade-off analyses (radar /
+# explorer / cross-configuration) can be read as a contiguous block.
 # ======================================================================
+st.header("Experimental reliability")
+st.caption(
+    "All reported quantities are aggregated across the available random "
+    "seeds and shown as means with SEM. This section also reports the "
+    "prediction error of each stakeholder's reward model (whose preferences "
+    "were learned more reliably) and the variability of the "
+    "cross-validation-selected hyperparameters across seeds."
+)
 st.subheader("Underlying model performance (mean across seeds)")
 
-# Outcome metric: Accuracy for classification, MAE for causal regression
 outcome_summaries = []
 reward_mses_per_seed = {}
 hparams_outcome = set()
@@ -799,158 +908,6 @@ with st.expander("Selected hyperparameters across the seeds"):
         "outcome_model (unique sets)": [json.loads(h) for h in hparams_outcome if h != "null"],
         "reward_models (unique sets)": [json.loads(h) for h in hparams_reward if h != "null"],
     })
-
-
-# ======================================================================
-# Comparison across all (reward_variant, model) buckets: Dirichlet ablation
-# ======================================================================
-st.markdown("---")
-st.subheader("Cross-bucket comparison: which compromise rule is most robust?")
-st.caption(
-    "A Dirichlet weight sweep is run for **every** (reward_variant × model) bucket present in "
-    "your `results/`, sharing the same random weight samples across buckets so the comparison is fair. "
-    "Bars show the share of weight configurations where each rule is the consensus winner. "
-    "Reference baselines (Oracle / Random / Outcome_Pred_Model / Outcome_Maxim) are excluded."
-)
-
-
-@st.cache_data
-def _dirichlet_across_buckets(results_root_str: str, use_case: str, *,
-                              n_samples: int, seed: int) -> dict:
-    """For each (reward_variant, model) bucket, run an identical Dirichlet weight
-    sweep on its mean-across-seeds metrics, and return a dict of per-bucket
-    winner-share series."""
-    runs = discover_runs(results_root_str, use_case, sample_size_only=10000)
-    if not runs:
-        return {}
-    buckets: dict[tuple[str, str], list[str]] = {}
-    for r in runs:
-        buckets.setdefault((r["reward_variant"], r["model"]), []).append(r["csv"])
-
-    use_case_cfg = _load_use_case_yaml(use_case)
-    ranking_criteria = dict(use_case_cfg["criteria"]["ranking_criteria"])
-    metrics = list(use_case_cfg["criteria"]["metrics_for_evaluation"])
-
-    weight_configs = sweep_dirichlet(metrics, n_samples=n_samples, alpha=1.0, seed=seed)
-    exclude = set(ABLATE_EXCLUDE)
-
-    out = {}
-    for (rv, model), csvs in buckets.items():
-        per_seed_dfs = []
-        for p in csvs:
-            df = pd.read_csv(p)
-            drop = [c for c in df.columns if any(k in c for k in (" Normalized", " Rank", "Weighted Normalized-Sum"))]
-            per_seed_dfs.append(df.drop(columns=drop, errors="ignore"))
-        if not per_seed_dfs:
-            continue
-        long_df = ablate_to_long(per_seed_dfs, weight_configs, ranking_criteria, metrics, exclude)
-        winners = long_df[long_df["is_consensus_winner"]]
-        counts = winners["Actor/Criterion"].value_counts()
-        stability = winners.groupby("Actor/Criterion")["consensus_winner_stability"].mean()
-        out[(rv, model)] = {
-            "counts": counts,
-            "stability": stability,
-            "n_configs": int(len(weight_configs)),
-            "n_seeds": len(csvs),
-        }
-    return out
-
-
-col_ctrl, col_info = st.columns([1, 3])
-with col_ctrl:
-    n_samples = st.slider("Dirichlet samples", min_value=100, max_value=1000, value=300, step=100,
-                          help="More samples → tighter winner-share estimates but slower computation.")
-    sweep_seed = st.number_input("Sweep seed", value=0, min_value=0, max_value=2_000_000_000, step=1,
-                                 help="Random seed for the Dirichlet samples. All buckets share the same seed.")
-
-with col_info:
-    st.info(
-        "The same `n` samples are drawn from the simplex and replayed against every bucket's "
-        "(mean-across-seeds) metrics. So differences in the bars below reflect bucket effects, "
-        "not weight-sampling noise."
-    )
-
-per_bucket = _dirichlet_across_buckets(
-    str(results_root), use_case, n_samples=int(n_samples), seed=int(sweep_seed),
-)
-
-if len(per_bucket) < 2:
-    st.warning(
-        f"Only {len(per_bucket)} bucket(s) discovered under `results/{use_case}/`. "
-        "The cross-bucket comparison needs at least two; train more configurations to enable it."
-    )
-else:
-    # Build a grouped bar chart: y = actors, x = winner share %, one bar per bucket.
-    bucket_keys = sorted(per_bucket.keys())  # ((reward, model), …)
-    bucket_labels = [f"{rv} / {model}" for (rv, model) in bucket_keys]
-    palette = list(_plt.get_cmap("tab10").colors)
-    bucket_colors = [palette[i % len(palette)] for i in range(len(bucket_keys))]
-
-    # Union of actors across buckets, ordered by total wins (descending) so the
-    # most-frequent winner sits at the top.
-    union_counts: dict[str, int] = {}
-    for k in bucket_keys:
-        for a, v in per_bucket[k]["counts"].items():
-            union_counts[a] = union_counts.get(a, 0) + int(v)
-    actors_ordered = sorted(union_counts, key=lambda a: -union_counts[a])
-
-    fig = Figure(figsize=(11, max(4.5, 0.42 * len(actors_ordered) + 1.6)))
-    ax = fig.subplots()
-    ax.grid(False)
-    y = np.arange(len(actors_ordered))
-    n_buckets = len(bucket_keys)
-    bar_h = 0.78 / n_buckets
-
-    for i, (k, label) in enumerate(zip(bucket_keys, bucket_labels)):
-        info = per_bucket[k]
-        total = info["n_configs"]
-        shares = np.array([info["counts"].get(a, 0) / max(total, 1) * 100 for a in actors_ordered])
-        offset = (i - (n_buckets - 1) / 2) * bar_h
-        ax.barh(
-            y + offset, shares, height=bar_h,
-            color=bucket_colors[i],
-            edgecolor="white", linewidth=0.6, alpha=0.92,
-            label=f"{label}  (n_seeds={info['n_seeds']})",
-        )
-        max_share = max(shares) if len(shares) else 0
-        for j, share in enumerate(shares):
-            if share >= max_share * 0.06:
-                ax.text(share + max_share * 0.008, y[j] + offset,
-                        f"{share:.0f}%", va="center", ha="left",
-                        fontsize=8.5, color="#222")
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(actors_ordered)
-    ax.invert_yaxis()
-    ax.set_xlabel("Share of weight configurations won (%)", fontsize=11)
-    ax.set_title(f"{use_case.title()} -- cross-bucket Dirichlet winner share  "
-                 f"({n_samples} configs over the {len(use_case_cfg['criteria']['metrics_for_evaluation'])}-metric simplex)",
-                 fontsize=12, pad=10)
-    ax.grid(alpha=0.25, axis="x", linestyle="--")
-    for s in ("top", "right"):
-        ax.spines[s].set_visible(False)
-    ax.legend(loc="lower right", frameon=True, edgecolor="lightgray", title="Bucket")
-    fig.tight_layout()
-    st.pyplot(fig, use_container_width=True)
-
-    # Companion table with stability and counts so the user can dig in.
-    with st.expander("Per-bucket numerical breakdown"):
-        tbl_rows = []
-        for k, label in zip(bucket_keys, bucket_labels):
-            info = per_bucket[k]
-            for actor in actors_ordered:
-                wins = int(info["counts"].get(actor, 0))
-                share = wins / max(info["n_configs"], 1) * 100
-                stab = float(info["stability"].get(actor, float("nan")))
-                tbl_rows.append({
-                    "Bucket": label,
-                    "Actor / criterion": actor,
-                    "Wins": wins,
-                    "Share (%)": round(share, 1),
-                    "Mean stability": round(stab, 2) if not np.isnan(stab) else None,
-                    "n_seeds": info["n_seeds"],
-                })
-        st.dataframe(pd.DataFrame(tbl_rows), use_container_width=True, hide_index=True)
 
 
 st.markdown(
