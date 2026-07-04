@@ -1,8 +1,6 @@
-# Participatory Training — A Multi-Stakeholder Decision-Support Framework
+# A Multi-Stakeholder Decision-Support Framework
 
-> Reframes automated decision-making as a **collective-choice problem**: stakeholder preferences become endogenous reward signals that drive both the per-row action and the cross-actor aggregation, so the normative trade-offs that conventional pipelines hide become inspectable.
-
-This repository accompanies the JAIR submission *"A Multi-Stakeholder Framework for Automated Decision-Support Systems"*.
+This repository accompanies the paper *"A Multi-Stakeholder Framework for ML-based Decision-Support Systems"*.
 
 ---
 
@@ -305,12 +303,5 @@ The framework is built on five design commitments worth stating explicitly:
 
 ---
 
-## Citation
-
-If you use this framework, please cite the JAIR paper:
-
-> *(citation block — to be filled in upon acceptance)*
-
-The dashboard URL above can be appended to the paper's reproducibility section.
 
 ---
