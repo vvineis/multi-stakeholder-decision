@@ -1,37 +1,14 @@
-# Full training pipeline dependencies.
+# Dependencies for the Streamlit dashboard (the deployed app).
 #
-# - `pip install -r requirements.txt` -- needed to run main.py and reproduce the experiments.
-# - `pip install -r requirements-dashboard.txt` -- lightweight set sufficient ONLY to
-#   run the read-only Streamlit dashboard against pre-computed result CSVs.
-#
-# The Streamlit Cloud deployment uses `requirements-dashboard.txt` (configured in the
-# Streamlit Cloud "Advanced settings"); locally, install this `requirements.txt`.
+# Streamlit Community Cloud auto-installs this file, so it is kept light: the
+# dashboard is read-only over pre-computed result CSVs/JSONs and needs none of
+# the heavy training deps. To train models / reproduce experiments, install
+# requirements-training.txt instead.
 
-# --- core scientific stack ---
-numpy>=1.24,<2
-pandas>=2.0
-scipy>=1.11
-scikit-learn>=1.3
-matplotlib>=3.7
-pyyaml>=6.0
-
-# --- configuration + experiment management ---
-hydra-core>=1.3
-omegaconf>=2.3
-
-# --- predictive models referenced by the YAML configs ---
-xgboost>=2.0
-lightgbm>=4.0
-imbalanced-learn>=0.11
-
-# --- causal inference (health use case) ---
-causalml>=0.15
-
-# --- dashboard + plotting ---
 streamlit>=1.30
 plotly>=5.20
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+matplotlib>=3.7
 jinja2>=3.0
-
-# --- jupyter (for plots_paper.ipynb) ---
-jupyter>=1.0
-ipykernel>=6.0

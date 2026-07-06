@@ -69,8 +69,8 @@ makes that decoupling inspectable.
 ├── ablations/                     # Weight-sweep CSVs (created by ablate_weights.py)
 ├── figs/                          # Rendered figures
 ├── results/                       # Per-run artifacts (created by main.py)
-├── requirements.txt               # Full training-pipeline deps
-├── requirements-dashboard.txt     # Lightweight subset for the dashboard
+├── requirements.txt               # Dashboard deps (installed by Streamlit Cloud)
+├── requirements-training.txt      # Full training-pipeline deps
 └── .streamlit/config.toml         # Dashboard theme + server config
 ```
 
@@ -82,11 +82,12 @@ makes that decoupling inspectable.
 # Python 3.11 recommended
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-training.txt
 ```
 
-`requirements.txt` covers training and every figure. `requirements-dashboard.txt` is
-the lightweight subset for the cloud dashboard.
+`requirements-training.txt` covers training and every figure. The lightweight
+`requirements.txt` holds only the dashboard's dependencies and is the file Streamlit
+Community Cloud installs automatically.
 
 ### Data
 
