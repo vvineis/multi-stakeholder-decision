@@ -1,4 +1,4 @@
-# Participatory Training — A Multi-Stakeholder Decision-Support Framework
+# A Multi-Stakeholder Decision-Support Framework
 
 Reframes automated decision-making as a **collective-choice problem**: stakeholder
 preferences become endogenous reward signals that drive both the per-row action and
