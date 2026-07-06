@@ -2,11 +2,23 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 import pandas as pd
 from hydra.utils import instantiate
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+
+# Repo root (parent of this src/ package). Relative config paths resolve against
+# it, so they work regardless of Hydra's runtime working directory.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def resolve_repo_path(path) -> Path:
+    """Resolve `path` against the repo root if it is relative."""
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
 
 
 # ----------------------------------------------------------------------
@@ -42,7 +54,7 @@ def normalize_lending(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_dataset(cfg) -> pd.DataFrame:
     """Load + slice + use-case-normalize the raw CSV. Use this everywhere instead of pd.read_csv."""
-    df = pd.read_csv(cfg.data_path).iloc[: cfg.sample_size]
+    df = pd.read_csv(resolve_repo_path(cfg.data_path)).iloc[: cfg.sample_size]
     if cfg.use_case.name == "lending":
         df = normalize_lending(df)
     return df

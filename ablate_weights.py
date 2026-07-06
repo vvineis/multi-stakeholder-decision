@@ -1,45 +1,24 @@
 """
-Weight ablation (paper edition, multi-seed aware).
+Weight ablation over the fixed per-actor metric tensor (multi-seed aware).
 
-Three sweep types are supported, each with a clear paper purpose:
+Sweep types:
+* `pairwise`  — vary the weight on metric A from 0 to 1 (B = 1 - A, rest 0).
+* `ternary`   — triangular grid over the (A, B, C) simplex (rest 0).
+* `dirichlet` — Monte-Carlo over the full evaluation-metric simplex.
 
-* `pairwise`  -- vary the weight on metric A from 0 to 1 with metric B = (1 - A)
-                 and all other weights = 0. Produces the canonical fair-ML
-                 trade-off curve (e.g. Accuracy vs. Demographic Parity).
-* `ternary`   -- triangular grid over the (A, B, C) 2-simplex with all other
-                 weights = 0. Renders as a ternary plot showing the geometry
-                 of winner regions in a three-objective trade-off.
-* `dirichlet` -- Monte-Carlo over the simplex of all evaluation-metric weights.
-                 Quantifies the *robustness* of each compromise rule: how often
-                 it wins under a random sample of normative priors.
+Point `--metrics-glob` at the per-seed CSVs for one configuration. Each seed is
+re-ranked per weight config; the script reports the mean weighted-normalized-sum
+(with SEM), the consensus winner (highest mean), and consensus stability
+(fraction of seeds whose per-seed winner matches).
 
-Multi-seed aggregation
-----------------------
-Use `--metrics-glob` (preferred) to point at the per-seed CSVs for one
-configuration; the script:
+Output is one long-format CSV per (config, actor) with columns:
+    config_id, weight_<m>..., Actor/Criterion, weighted_sum_mean,
+    weighted_sum_sem, n_seeds, rank_within_config, is_consensus_winner,
+    consensus_winner_stability
 
-  1. Re-ranks each seed under each weight configuration.
-  2. Averages the weighted-normalized-sum across seeds, with SEM.
-  3. Determines the **consensus winner** = the actor with the highest
-     mean weighted-sum at that config.
-  4. Reports **consensus stability** = fraction of seeds where the
-     per-seed winner agrees with the consensus winner.
-
-Pass `--metrics-csv` instead for a single CSV (legacy mode, `n_seeds = 1`,
-SEM = 0, stability is degenerate).
-
-Output: a single long-format CSV with one row per (config, actor):
-
-    config_id, weight_<m>..., Actor/Criterion,
-    weighted_sum_mean, weighted_sum_sem, n_seeds,
-    rank_within_config, is_consensus_winner, consensus_winner_stability
-
-Reference actors that are not compromise rules (`Oracle`, `Random`,
-`Outcome_Maxim`, `Nash Social Welfare`) are excluded from the winner search
-by default. `Outcome_Pred_Model` is *included* by default so it appears as a
-prediction-baseline reference in the ablation plots (usually with 0% winner
-share, showing the compromise rules dominate it). Override with
-`--include-all` or a custom `--exclude` list.
+Reference actors (Oracle, Random, Outcome_Maxim, Nash Social Welfare) are
+excluded from the winner search by default; Outcome_Pred_Model is kept as a
+prediction baseline. Override with `--include-all` or a custom `--exclude`.
 """
 from __future__ import annotations
 

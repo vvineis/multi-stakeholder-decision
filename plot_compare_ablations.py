@@ -183,10 +183,8 @@ def compare_dirichlet(dfs: list[pd.DataFrame], labels: list[str], output: Path, 
         per_csv_stability.append(stab)
         totals.append(int(counts.sum()))
 
-    # Union of actors *evaluated* in any bucket (not just winners) so actors
-    # that competed but never won -- e.g. Outcome_Pred_Model when it is
-    # dominated by the compromise rules at every sample -- still get a bar
-    # (at 0%) rather than being silently dropped from the y-axis.
+    # Every evaluated actor (not just winners) gets a row, so a competed-but-
+    # never-won actor still appears at 0%.
     union_counts: dict[str, int] = {}
     for df in dfs:
         for a in df["Actor/Criterion"].unique():
@@ -194,8 +192,6 @@ def compare_dirichlet(dfs: list[pd.DataFrame], labels: list[str], output: Path, 
     for c in per_csv_counts:
         for a, v in c.items():
             union_counts[a] = union_counts.get(a, 0) + int(v)
-    # Sort by total wins (descending); zero-win actors sort to the bottom by
-    # count and then alphabetically for stability.
     actors = sorted(union_counts, key=lambda a: (-union_counts[a], a))
 
     n = len(dfs)
@@ -216,17 +212,13 @@ def compare_dirichlet(dfs: list[pd.DataFrame], labels: list[str], output: Path, 
             offset = (i - (n - 1) / 2) * bar_h
             
             ax.barh(
-                y + offset, shares, 
-                height=bar_h * 0.9,     # Leaves a 15% clear gap between single bars
+                y + offset, shares,
+                height=bar_h * 0.9,
                 color=bucket_colors[i],
                 edgecolor="white", linewidth=0.6, alpha=0.92,
                 label=f"{label}  (n={total})",
             )
-            # Inline labels: percentage + mean inter-seed stability of that rule
-            # as consensus winner in this bucket (e.g.  "57%  s=0.80"). Label
-            # every actor that won at least one config; actors with a zero
-            # share (competed but never won) get no label -- an empty bar is a
-            # legible zero.
+            # Label share + mean stability for actors that won at least once.
             max_share = max(shares) if len(shares) else 0
             stab_series = per_csv_stability[i]
             for j, share in enumerate(shares):

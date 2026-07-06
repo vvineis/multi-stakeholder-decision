@@ -1,7 +1,7 @@
 name: lending 
 
-data_path: "C:/Users/Vittoria/Desktop/part-train/participatory_training-main/data/lending_club_data.csv"
-result_path: "C:/Users/Vittoria/Desktop/part-train/new-code/results/lending/"
+data_path: "data/lending_club_data.csv"
+result_path: "results/lending/"
 
 criteria:
   ranking_criteria:

@@ -16,7 +16,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 from src.pipeline import Pipeline
-from src.preprocessing import DataProcessor, load_dataset
+from src.preprocessing import DataProcessor, load_dataset, resolve_repo_path
 
 
 def _save_results(
@@ -30,7 +30,7 @@ def _save_results(
     unique_id = time.strftime("%Y%m%d-%H%M%S")
     seed = int(cfg.get("seed", 111))
     folder = os.path.join(
-        cfg.result_path,
+        resolve_repo_path(cfg.result_path),
         f"run_{unique_id}_seed{seed}_Acc_{cfg.ranking_weights.Accuracy}_Fair_{cfg.ranking_weights.Demographic_Parity}",
     )
     os.makedirs(folder, exist_ok=True)
@@ -122,7 +122,7 @@ def main(cfg: DictConfig):
     print(final_results)
 
     # ----- persist -----
-    os.makedirs(cfg.result_path, exist_ok=True)
+    os.makedirs(resolve_repo_path(cfg.result_path), exist_ok=True)
     _save_results(
         cfg,
         cv_results,

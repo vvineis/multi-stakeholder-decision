@@ -1,7 +1,7 @@
 name: health
 
-data_path: "C:/Users/Vittoria/Desktop/part-train/participatory_training-main/data/health/ihdp_npci_1.csv"
-result_path: "C:/Users/Vittoria/Desktop/part-train/new-code/results/health/"
+data_path: "data/health/ihdp_npci_1.csv"
+result_path: "results/health/"
 
 criteria:
   ranking_criteria:

@@ -1,21 +1,9 @@
 """
-Combined paper figure: multi-bucket Pareto (left) + ternary overlay (right),
-sharing a single actor colour map and a single bucket marker map, with one
-legend block placed below both panels.
+Combined figure: multi-bucket Pareto (left) + ternary overlay (right), sharing
+one actor colour map and one bucket marker map, with a joined legend below.
 
-Left panel: same content as `plot_pareto.py --metrics-globs ... --labels ...`
-    -- axes normalised to [0, 1] with 1 = best, marker shape encodes the
-    bucket, marker colour encodes the decision function, per-bucket
-    Pareto-optimal points highlighted with a larger marker + thick black
-    outline.
-
-Right panel: same content as `plot_compare_ablations.py --inputs
-<ternary CSVs> --labels ...` -- one ternary simplex, marker shape encodes
-    the bucket, marker colour encodes the consensus winner at that grid
-    point, opacity encodes inter-seed stability.
-
-Both panels use the SAME (actor, colour) map and the SAME (bucket, marker)
-map, so the joined legend below the figure applies to both.
+Left panel matches `plot_pareto.py` multi-bucket mode; right panel matches the
+ternary overlay of `plot_compare_ablations.py`.
 
 Example
 -------

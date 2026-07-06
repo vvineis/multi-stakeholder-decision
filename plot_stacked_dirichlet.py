@@ -74,8 +74,7 @@ def main():
     # Shared canonical colour map + shared y-axis ordering across rows.
     all_actors = set().union(*(set(df["Actor/Criterion"].unique()) for df in dfs))
     color_map = make_actor_color_map(all_actors, palette=ACTOR_PALETTE)
-    # Reversed so barh (bottom-up) puts the canonical-first actor at the TOP
-    # of the axis -- matches how the reader scans the ternary/Pareto legend.
+    # Reversed so barh (bottom-up) puts the canonical-first actor at the top.
     y_order = _shared_axis_order(dfs)[::-1]
 
     n_rows = len(dfs)

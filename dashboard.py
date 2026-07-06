@@ -1,27 +1,11 @@
 """
-Accountability dashboard -- aggregated edition.
+Read-only accountability dashboard for the lending use case.
 
-What this version adds over the per-run one:
+Groups runs by (reward_variant, predictive_model), reports mean +/- SEM
+across seeds, and recomputes rankings live from the cached per-run metric
+CSVs using the same `rerank` the training pipeline uses.
 
-1.  Runs are now grouped by (sample_size, reward_variant, outcome_classifier),
-    and the dashboard reports **mean +/- SEM** across all the matching seeds.
-    The radar, the ranking table and the model-performance numbers all use
-    the aggregated values.
-
-2.  An expandable **"Compromise functions -- definitions"** section that prints
-    each rule's score map Phi as LaTeX, matched to Table 1 of the paper.
-
-3.  A **trade-off table**: pick two metrics, pick a weight grid (e.g. 0, 0.25,
-    0.5, 0.75, 1), and the dashboard reports the best compromise function for
-    each weight combination. Optionally restrict the candidate set to "compromise
-    rules only" (excluding Oracle / single-stakeholder baselines).
-
-4.  When no runs match the chosen (sample_size, reward_variant, model) triple,
-    the dashboard prints the exact `python main.py ...` command that would
-    produce those runs -- so the user can copy-paste it instead of clicking
-    around.
-
-Run from `new-code/`:
+Run:
     streamlit run dashboard.py
 """
 from __future__ import annotations
@@ -92,23 +76,11 @@ COMPROMISE_FORMULAS = {
     ),
 }
 
-# Sets we use to decide what counts as a "compromise rule" for the trade-off table.
 COMPROMISE_RULES = set(COMPROMISE_FORMULAS.keys())
-
-
 TRADEOFF_EXCLUDE = {"Oracle", "Random"}
 
 
-# ----------------------------------------------------------------------
-# Per-stakeholder reward functions r_i (paper Section 4.1)
-# ----------------------------------------------------------------------
-# Each reward combines a base lookup table indexed by (action, outcome,
-# applicant_type) with context-dependent multiplicative adjustments capturing
-# the loan amount L and interest rate R, plus i.i.d. uniform noise clipped
-# to [0, 1]. The adjustment factors:
-#   l(L) = clip(L / 10000, 0.5, 1.5)        (loan factor)
-#   p(R) = clip(R, 0.05, 0.25)              (rate factor)
-#   xi ~ Uniform(-0.05, 0.05)               (noise)
+# Per-stakeholder reward functions r_i (paper Section 4.1), as LaTeX.
 LENDING_REWARD_FORMULAS = {
     "Bank": (
         r"r_{\mathrm{Bank}}(a, o, T, L, R) = "
@@ -136,33 +108,9 @@ LENDING_REWARD_FORMULAS = {
     ),
 }
 
-# For health, the formulas are closed-form so the base table is not needed.
-HEALTH_REWARD_FORMULAS = {
-    "Parent": (
-        r"r_{\mathrm{Parent}}(o) = \mathrm{clip}\!\left("
-        r"\frac{o - o_{\min}}{o_{\max} - o_{\min}},\; 0, 1\right)",
-        "Directly proportional to the normalized cognitive score; parents "
-        "value any improvement in their child's outcome.",
-    ),
-    "Healthcare_Provider": (
-        r"r_{\mathrm{HCP}}(o, a) = \mathrm{clip}\!\left("
-        r"\alpha \cdot \frac{\max(0,\, o - o_{\min,a})}{o_{\max,a} - o_{\min,a}} + "
-        r"(1 - \alpha) \cdot \left(1 - \frac{c_a}{\max_{a'} c_{a'}}\right) + \xi,\; 0, 1\right)",
-        r"Convex combination ($\alpha = 0.8$) of normalized outcome improvement "
-        r"and treatment-cost efficiency ($c_a$ is the cost of action $a$).",
-    ),
-    "Policy_Maker": (
-        r"r_{\mathrm{PM}}(o, a, x_{23}) = \mathrm{clip}\!\left("
-        r"\frac{\max(0,\, o - o_{\min,a})}{o_{\max,a} - o_{\min,a}} \cdot "
-        r"\bigl(1 + \beta (x_{23} - 0.5)\bigr) + \xi,\; 0, 1\right)",
-        r"Outcome improvement weighted by a demographic fairness term "
-        r"($\beta = 0.5$); rewards equity across the protected attribute $x_{23}$.",
-    ),
-}
-
 
 def _lending_base_reward_table(structures: dict, stakeholder: str, group_id: int) -> pd.DataFrame:
-    """Build a (action x outcome) DataFrame of base rewards for a (group, stakeholder)."""
+    """Build an (action x outcome) DataFrame of base rewards for a (group, stakeholder)."""
     raw = structures[group_id][stakeholder]
     actions = ["Grant", "Grant_lower", "Not_Grant"]
     outcomes = ["Fully_Repaid", "Partially_Repaid", "Not_Repaid"]
@@ -420,16 +368,17 @@ if results_root is None:
     st.stop()
 
 
-# ---- Sidebar: use case + configuration ------------------------------
-with st.sidebar:
-    st.header("1. Use case")
-    use_case = st.selectbox("Use case", options=("lending", "health"), index=0)
-    try:
-        use_case_cfg = _load_use_case_yaml(use_case)
-    except FileNotFoundError:
-        st.error("Cannot find conf/use_case/*.yaml. Are you running from new-code/?")
-        st.stop()
+# ---- Sidebar: configuration -----------------------------------------
+# The dashboard is scoped to the lending use case. The health scenario is
+# fully supported by the training pipeline (see README) but not exposed here.
+use_case = "lending"
+try:
+    use_case_cfg = _load_use_case_yaml(use_case)
+except FileNotFoundError:
+    st.error("Cannot find conf/use_case/lending.yaml. Are you running from the project root?")
+    st.stop()
 
+with st.sidebar:
     all_runs = discover_runs(str(results_root), use_case)
     if not all_runs:
         st.error(
@@ -441,7 +390,7 @@ with st.sidebar:
     reward_variants = sorted({r["reward_variant"] for r in all_runs})
     models = sorted({r["model"] for r in all_runs})
 
-    st.header("2. Configuration")
+    st.header("1. Configuration")
     reward_variant = st.selectbox(
         "Reward variant", options=reward_variants,
         index=reward_variants.index("base") if "base" in reward_variants else 0,
@@ -450,9 +399,6 @@ with st.sidebar:
         "Predictive model", options=models,
         index=models.index("rf") if "rf" in models else 0,
     )
-    # Sample size is no longer a user-facing knob -- we always filter to 10000
-    # for lending (handled in discover_runs). All matched runs therefore share
-    # the same sample size.
     sample_size = next((r["sample_size"] for r in all_runs), None)
 
     matched = [r for r in all_runs
@@ -486,7 +432,7 @@ default_weights = dict(use_case_cfg["criteria"]["ranking_weights"])
 
 # ---- Sidebar: metric picker + weight sliders ------------------------
 with st.sidebar:
-    st.header("3. Metrics in play")
+    st.header("2. Metrics in play")
     st.caption("These metrics participate in BOTH the radar and the live score.")
     selected_metrics = st.multiselect(
         "Metrics",
@@ -497,7 +443,7 @@ with st.sidebar:
         st.warning("Select at least one metric.")
         st.stop()
 
-    st.header("4. Ranking weights")
+    st.header("3. Ranking weights")
     weights: dict[str, float] = {}
     for m in selected_metrics:
         weights[m] = st.slider(
@@ -530,10 +476,8 @@ banner_cols[3].metric("Seeds aggregated", len(seeds_present))
 if sample_size:
     st.caption(f"All runs at sample_size = {sample_size}.")
 
-# Slug used to look up pre-rendered per-bucket figures on disk.
-# Convention: figs/{pareto,ablation}_<model>_<reward_variant>_<sample_size>_*.png,
-# matching the naming produced by the paper-figure scripts. Some legacy files
-# lack the sample_size suffix, so we also try `bucket_slug_short` as a fallback.
+# Slug for looking up pre-rendered per-bucket figures; the short form (no
+# sample-size suffix) is tried as a fallback.
 bucket_slug = f"{model}_{reward_variant}_{sample_size}" if sample_size else f"{model}_{reward_variant}"
 bucket_slug_short = f"{model}_{reward_variant}"
 
@@ -541,10 +485,7 @@ st.markdown("---")
 
 
 # ======================================================================
-# Framework layers -- mirror the paper's Section on the dashboard.
-# The three layers below are Preference / Decision / Aggregation. Each is
-# rendered as its own top-level section so users can inspect a single stage
-# of the decision process in isolation.
+# Framework layers: Preference / Decision / Aggregation
 # ======================================================================
 st.header("Framework layers")
 st.caption(
@@ -565,64 +506,49 @@ st.caption(
     "preferences before any learning takes place."
 )
 with st.expander(f"Show reward functions  --  {use_case} ({reward_variant} variant)", expanded=False):
-    if use_case == "lending":
-        st.markdown(
-            r"For each applicant context, the reward of stakeholder $i$ is the "
-            r"product of a **base lookup table** $R^{i}_{\mathrm{base}}(a, o, T)$ "
-            r"(indexed by action $a$, repayment outcome $o$, applicant type $T$) "
-            r"and a context-dependent adjustment in the loan amount $L$ and "
-            r"interest rate $R$, plus i.i.d. uniform noise clipped to $[0, 1]$."
-        )
-        st.markdown("**Adjustment factors**")
-        st.latex(
-            r"\ell(L) = \mathrm{clip}\!\left(\frac{L}{10{,}000},\, 0.5,\, 1.5\right), \quad "
-            r"\rho(R) = \mathrm{clip}\!\left(R,\, 0.05,\, 0.25\right), \quad "
-            r"\xi \sim \mathrm{Unif}(-0.05, 0.05)"
-        )
+    st.markdown(
+        r"For each applicant context, the reward of stakeholder $i$ is the "
+        r"product of a **base lookup table** $R^{i}_{\mathrm{base}}(a, o, T)$ "
+        r"(indexed by action $a$, repayment outcome $o$, applicant type $T$) "
+        r"and a context-dependent adjustment in the loan amount $L$ and "
+        r"interest rate $R$, plus i.i.d. uniform noise clipped to $[0, 1]$."
+    )
+    st.markdown("**Adjustment factors**")
+    st.latex(
+        r"\ell(L) = \mathrm{clip}\!\left(\frac{L}{10{,}000},\, 0.5,\, 1.5\right), \quad "
+        r"\rho(R) = \mathrm{clip}\!\left(R,\, 0.05,\, 0.25\right), \quad "
+        r"\xi \sim \mathrm{Unif}(-0.05, 0.05)"
+    )
 
-        try:
-            structures = RewardCalculator.get_structures_for_variant(reward_variant)
-        except ValueError:
-            structures = None
-            st.warning(f"Unknown reward variant '{reward_variant}' -- showing formulas only.")
+    try:
+        structures = RewardCalculator.get_structures_for_variant(reward_variant)
+    except ValueError:
+        structures = None
+        st.warning(f"Unknown reward variant '{reward_variant}'; showing formulas only.")
 
-        for actor in ("Bank", "Applicant", "Regulatory"):
-            st.markdown(f"#### {actor}")
-            latex, descr = LENDING_REWARD_FORMULAS[actor]
-            st.latex(latex)
-            st.caption(descr)
+    for actor in ("Bank", "Applicant", "Regulatory"):
+        st.markdown(f"#### {actor}")
+        latex, descr = LENDING_REWARD_FORMULAS[actor]
+        st.latex(latex)
+        st.caption(descr)
 
-            if structures is None:
-                continue
-            base_cols = st.columns(2)
-            for col, (group_id, group_label) in zip(
-                base_cols,
-                [(0, "Non-vulnerable applicants  (T = 0)"),
-                 (1, "Vulnerable applicants  (T = 1)")],
-            ):
-                with col:
-                    st.markdown(f"**Base reward table** -- {group_label}")
-                    df = _lending_base_reward_table(structures, actor, group_id)
-                    styled = (
-                        df.style
-                        .background_gradient(cmap="RdYlGn", vmin=0, vmax=1)
-                        .format("{:.2f}")
-                    )
-                    st.dataframe(styled, use_container_width=True)
-
-    else:  # health
-        st.markdown(
-            "Each actor's reward is a closed-form mapping from the observed "
-            r"cognitive outcome $o$, the chosen action $a$ "
-            r"($\mathrm{A}$ = treatment, $\mathrm{C}$ = control), and the "
-            r"demographic attribute $x_{23}$, plus i.i.d. uniform noise "
-            r"clipped to $[0, 1]$. Per-action statistics "
-            r"$o_{\min,a}, o_{\max,a}$ are computed from the training data."
-        )
-        for actor, (latex, descr) in HEALTH_REWARD_FORMULAS.items():
-            st.markdown(f"#### {actor}")
-            st.latex(latex)
-            st.caption(descr)
+        if structures is None:
+            continue
+        base_cols = st.columns(2)
+        for col, (group_id, group_label) in zip(
+            base_cols,
+            [(0, "Non-vulnerable applicants  (T = 0)"),
+             (1, "Vulnerable applicants  (T = 1)")],
+        ):
+            with col:
+                st.markdown(f"**Base reward table** -- {group_label}")
+                df = _lending_base_reward_table(structures, actor, group_id)
+                styled = (
+                    df.style
+                    .background_gradient(cmap="RdYlGn", vmin=0, vmax=1)
+                    .format("{:.2f}")
+                )
+                st.dataframe(styled, use_container_width=True)
 
 
 # ----------------------------------------------------------------------
@@ -679,9 +605,7 @@ st.markdown("---")
 
 
 # ======================================================================
-# Normative trade-off analyses -- three complementary visualisations.
-# Directly mirrors the paper's Section on the dashboard: performance radar,
-# trade-off explorer, cross-configuration comparison.
+# Normative trade-off analyses
 # ======================================================================
 st.header("Normative trade-off analyses")
 st.caption(
@@ -761,7 +685,7 @@ else:
 
 
 # ----------------------------------------------------------------------
-# Trade-off analysis 2: Pairwise weight explorer + Pareto/ternary figure
+# Trade-off analysis 2: pairwise weight explorer
 # ----------------------------------------------------------------------
 st.subheader("Trade-off explorer  --  two-metric weight grid")
 st.caption(
@@ -849,9 +773,7 @@ st.markdown("---")
 
 
 # ======================================================================
-# Experimental reliability -- aggregated model performance & selection.
-# Sits at the bottom of the dashboard so the trade-off analyses (radar /
-# explorer / cross-configuration) can be read as a contiguous block.
+# Experimental reliability: model performance and selection
 # ======================================================================
 st.header("Experimental reliability")
 st.caption(
