@@ -6,7 +6,7 @@ the cross-actor aggregation, so the normative trade-offs that conventional pipel
 hide become inspectable.
 
 This repository accompanies the paper *"A Multi-Stakeholder Framework for
-Automated Decision-Support Systems"*.
+ML-based Decision-Support Systems"*.
 
 ---
 
@@ -302,10 +302,3 @@ prints the exact `python main.py …` command to fill the gap.
 5. **Compromise Programming weights.** The framework permits non-uniform actor weights
    $w_i$; the experiments use $w_i = 1$, matching Table 1 of the paper.
 
----
-
-## Citation
-
-If you use this framework, please cite the paper:
-
-> *(citation block — to be filled in upon acceptance)*
